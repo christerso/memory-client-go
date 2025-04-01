@@ -1,0 +1,14 @@
+[Unit]
+Description=Memory Client MCP Service
+After=network.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_YOUR_USERNAME
+WorkingDirectory=/path/to/memory-client-go
+ExecStart=/usr/bin/go run main.go mcp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
