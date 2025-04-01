@@ -2,6 +2,16 @@
 
 This directory contains scripts to help you manage the Memory Client MCP service.
 
+## Port Configuration
+
+The Memory Client uses the following ports:
+
+- **MCP Service (Status Page)**: Port 9580 (http://localhost:9580/status)
+- **Dashboard**: Port 9581 (http://localhost:9581)
+- **API Service**: Port 10010 (http://localhost:10010/api/*)
+
+These ports were chosen to avoid conflicts with other common applications that might use ports 8080 and 8081.
+
 ## Available Scripts
 
 ### Windows Scripts
@@ -17,7 +27,7 @@ scripts\restart-mcp-service.bat
 ```
 
 #### check-mcp-status.bat
-Windows batch script to check if the MCP service is running and responding.
+Windows batch script to check if the MCP service is running and responding on port 9580.
 
 ```batch
 scripts\check-mcp-status.bat
@@ -48,17 +58,25 @@ scripts\install-mcp-service.bat
 ```
 
 #### start-mcp-service.bat
-Windows batch script to start the MCP service in the background.
+Windows batch script to start the MCP service in the background. This is useful for development or testing without installing as a Windows service.
 
 ```batch
 scripts\start-mcp-service.bat
 ```
 
 #### verify-mcp-service.bat
-Windows batch script to verify the MCP service is installed and running correctly.
+Windows batch script to verify the MCP service is installed and running correctly. Checks both the Windows service status and HTTP accessibility on port 9580.
 
 ```batch
 scripts\verify-mcp-service.bat
+```
+
+#### update-mcp-service.bat
+Windows batch script to update an existing MCP service installation with the latest code changes. Rebuilds the executable and updates service configuration.
+
+```batch
+# Run as Administrator
+scripts\update-mcp-service.bat
 ```
 
 #### ensure-qdrant.bat
@@ -173,7 +191,7 @@ Shell script to index a project directory on macOS or Linux.
 
 ### Windows
 
-- **open-mcp-dashboard.bat**: Opens the MCP service status page in your browser and optionally starts the full dashboard with dark/light mode
+- **open-mcp-dashboard.bat**: Opens the MCP service status page (http://localhost:9580) in your browser and optionally starts the full dashboard (http://localhost:9581) with dark/light mode
 
 ### Mac/Linux
 
@@ -195,6 +213,7 @@ If you encounter issues with the MCP service:
 2. Look at the logs in the `logs` directory
 3. Try restarting the service with `restart-mcp-service.bat` or by running `sudo systemctl restart memory-client-mcp.service` on Linux
 4. If the service is in a PAUSED state, use `fix-mcp-service.bat` to repair it
+5. Verify the service is accessible by visiting http://localhost:9580/status in your browser
 
 ## Running the MCP Service Directly
 
@@ -204,7 +223,7 @@ You can also run the MCP service directly using:
 go run main.go mcp
 ```
 
-The MCP service runs on port 8080 by default.
+The MCP service runs on port 9580 by default.
 
 ## Using with Editors
 
@@ -215,7 +234,7 @@ The MCP service runs on port 8080 by default.
 ## Checking Service Status
 
 You can check if the MCP service is running by visiting:
-http://localhost:8080/status
+http://localhost:9580/status
 
 ## Dashboard
 
@@ -225,4 +244,4 @@ You can also view the memory dashboard by running:
 go run main.go dashboard
 ```
 
-The dashboard runs on port 8081 by default.
+The dashboard runs on port 9581 by default.

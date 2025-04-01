@@ -10,7 +10,7 @@ set "ROOT_DIR=%SCRIPT_DIR%.."
 cd /d "%ROOT_DIR%"
 
 :: First check if the MCP service is running
-curl -s http://localhost:8080 >nul 2>&1
+curl -s http://localhost:9580 >nul 2>&1
 if %errorLevel% neq 0 (
     echo MCP service does not appear to be running.
     echo Please start the MCP service first.
@@ -20,7 +20,7 @@ if %errorLevel% neq 0 (
 
 :: Open the MCP service status page
 echo Opening MCP service status page...
-start http://localhost:8080
+start http://localhost:9580
 
 :: Ask if user wants to start the full dashboard
 echo.
@@ -37,7 +37,7 @@ if /i "%start_full%"=="y" (
     timeout /t 3 /nobreak >nul
     
     :: Open the full dashboard in the browser
-    start http://localhost:8081
+    start http://localhost:9581
     echo Full dashboard started and opened in your browser.
 ) else (
     echo Full dashboard not started.

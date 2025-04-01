@@ -25,7 +25,7 @@ if %errorLevel% equ 0 (
 :: Check if the service is responding to HTTP requests
 echo.
 echo Checking HTTP response...
-curl -s -o nul -w "HTTP Status: %%{http_code}" http://localhost:8080/status
+curl -s -o nul -w "HTTP Status: %%{http_code}" http://localhost:9580/status
 echo.
 
 :: Check service logs if they exist

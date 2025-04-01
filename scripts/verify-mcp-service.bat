@@ -49,14 +49,14 @@ if %errorLevel% equ 0 (
 :: Check if the HTTP server is accessible
 echo.
 echo Checking HTTP server accessibility...
-curl -s -o nul -w "%%{http_code}" http://localhost:8080/status >temp.txt
+curl -s -o nul -w "%%{http_code}" http://localhost:9580/status >temp.txt
 set /p STATUS_CODE=<temp.txt
 del temp.txt
 
 if "%STATUS_CODE%" == "200" (
-    echo MCP HTTP server is accessible at http://localhost:8080/status
+    echo MCP HTTP server is accessible at http://localhost:9580/status
 ) else (
-    echo MCP HTTP server is NOT accessible at http://localhost:8080/status
+    echo MCP HTTP server is NOT accessible at http://localhost:9580/status
     echo Status code: %STATUS_CODE%
     echo Please check if the server is running and the port is correct.
 )
@@ -75,7 +75,7 @@ echo To configure Windsurf to use the MCP service:
 echo 1. Open Windsurf
 echo 2. Go to Settings
 echo 3. Navigate to the "Memory" or "MCP" section
-echo 4. Set the MCP server URL to: http://localhost:8080
+echo 4. Set the MCP server URL to: http://localhost:9580
 echo 5. Save the settings
 
 echo.

@@ -98,12 +98,12 @@ if "%OLD_SIZE%" neq "%NEW_SIZE%" (
     del memory-client-go.exe.new
     
     :: Check if service is running properly
-    curl -s -o nul -w "%%{http_code}" http://localhost:8080/status >temp.txt 2>nul
+    curl -s -o nul -w "%%{http_code}" http://localhost:9580/status >temp.txt 2>nul
     set /p STATUS_CODE=<temp.txt
     del temp.txt 2>nul
     
     if "%STATUS_CODE%"=="200" (
-        echo MCP service is running correctly at http://localhost:8080/status
+        echo MCP service is running correctly at http://localhost:9580/status
         echo No need to reinstall or restart.
         goto :END
     ) else (
@@ -272,8 +272,8 @@ if %errorLevel% neq 0 (
 echo.
 echo Memory Client MCP service has been checked and fixed if needed.
 echo The service will automatically start when Windows boots.
-echo Service is running on port 8080.
-echo To verify the service is working, visit: http://localhost:8080/status
+echo Service is running on port 9580.
+echo To verify the service is working, visit: http://localhost:9580/status
 echo.
 
 pause

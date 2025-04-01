@@ -3,7 +3,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20DB-FF4F8B?style=flat-square)](https://qdrant.tech)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-4B32C3?style=flat-square)](https://github.com/roo-cline/mcp)
-[![Version](https://img.shields.io/badge/Version-1.2.0-success?style=flat-square)](https://github.com/roo-cline/memory-client-go)
+[![Version](https://img.shields.io/badge/Version-1.3.0-success?style=flat-square)](https://github.com/roo-cline/memory-client-go)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 > A Go-based memory client for the Model Context Protocol (MCP) that provides persistent conversation storage and project context using Qdrant vector database. This client enables Cline/Roo to maintain conversation history and project knowledge across sessions **automatically and seamlessly in the background**.
@@ -14,6 +14,7 @@
 - [How It Works](#-how-it-works)
 - [Installation](#-installation)
 - [Project Memory](#-project-memory)
+- [Conversation Tagging](#-conversation-tagging)
 - [Usage](#-usage)
 - [Advanced Usage Examples](#-advanced-usage-examples)
 - [Data Management](#-data-management)
@@ -62,6 +63,26 @@
         <li>Works with existing Qdrant instances</li>
         <li>Automatic VSCode integration</li>
         <li>Cross-platform support</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <h3>🏷️ Conversation Tagging</h3>
+      <ul>
+        <li>Automatic message categorization</li>
+        <li>Custom conversation tagging</li>
+        <li>Toggle between automatic/manual modes</li>
+        <li>Organize conversations by topic</li>
+      </ul>
+    </td>
+    <td width="50%">
+      <h3>🔄 Multi-IDE Support</h3>
+      <ul>
+        <li>VS Code extension integration</li>
+        <li>Windsurf integration script</li>
+        <li>Universal command-line client</li>
+        <li>HTTP API for custom integrations</li>
       </ul>
     </td>
   </tr>
@@ -138,6 +159,8 @@ The installation script will:
 - Configure it to work with Cline/Roo
 - Set up Qdrant to run at startup
 - Detect existing Qdrant instances
+- Install conversation tagging features
+- Set up IDE integrations
 
 For detailed installation instructions, see [INSTALL.md](INSTALL.md).
 
@@ -232,6 +255,83 @@ memory-client watch-project --path /path/to/repo --tag "my-project"
 ```
 
 Tags are stored in the vector database along with the file content, making it easier to retrieve related files later.
+
+## 🏷️ Conversation Tagging
+
+The memory client includes powerful features for tagging and categorizing conversations:
+
+<table>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client tag -tag="project-planning"
+```
+
+</td>
+<td>Set a tag for the current conversation</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client tag -mode=get-tag
+```
+
+</td>
+<td>Get the current conversation tag</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client tag-mode -mode=automatic
+```
+
+</td>
+<td>Enable automatic message categorization</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client tag-mode -mode=manual
+```
+
+</td>
+<td>Switch to manual tagging mode</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client message -role=user -content="Your message"
+```
+
+</td>
+<td>Send a message to be stored in memory</td>
+</tr>
+</table>
+
+### Automatic Categorization
+
+When in automatic mode, messages are analyzed and categorized into:
+- **Technical**: Code discussions, debugging, implementation details
+- **Planning**: Project planning, roadmaps, timelines
+- **Question**: General questions and inquiries
+- **Feedback**: Feedback, reviews, suggestions
+
+### IDE Integration
+
+- **VS Code Extension**: Automatically captures conversations from VS Code
+- **Windsurf Integration**: Adds UI elements to Windsurf for tagging and mode control
+- **Universal Client**: Command-line tool for any environment
+
+For detailed documentation on conversation tagging, see [docs/conversation-tagging.md](docs/conversation-tagging.md).
 
 ## 🚀 Usage
 
@@ -732,7 +832,21 @@ The Memory Client implements the Model Context Protocol (MCP) and exposes the fo
 
 ## ⚙️ Configuration
 
-The client can be configured using a `config.yaml` file:
+### Port Configuration
+
+The Memory Client uses the following ports:
+
+- **MCP Service (Status Page)**: Port 9580 (http://localhost:9580/status)
+- **Dashboard**: Port 9581 (http://localhost:9581)
+- **API Service**: Port 10010 (http://localhost:10010/api/*)
+
+These ports were chosen to avoid conflicts with other common applications that might use ports 8080 and 8081.
+
+### Configuration Files
+
+The memory client uses several configuration files:
+- Windows: `%APPDATA%\memory-client\config.yaml`
+- Linux/macOS: `~/.config/memory-client/config.yaml`
 
 ```yaml
 # Qdrant server URL
@@ -745,29 +859,44 @@ COLLECTION_NAME: "conversation_memory"
 EMBEDDING_SIZE: 384
 ```
 
-Configuration locations:
-- Windows: `%APPDATA%\memory-client\config.yaml`
-- Linux/macOS: `~/.config/memory-client/config.yaml`
-
 ## MCP Service Management
 
 The Memory Client MCP service provides persistent conversation storage for Windsurf IDE. Several scripts are available to help manage the service:
 
-### Windows Scripts
+### Checking Service Status
 
-- **restart-mcp-service.bat**: Stops, rebuilds, and restarts the MCP service with the latest code
-- **check-mcp-status.bat**: Checks if the service is running and responding correctly
-- **fix-mcp-service.bat**: Fixes issues with the service by checking version and reinstalling if necessary
-- **install-mcp-service.bat**: Installs the MCP service as a Windows service (requires NSSM)
-- **uninstall-mcp-service.bat**: Properly removes the MCP service
+You can check if the MCP service is running by visiting:
+```
+http://localhost:9580/status
+```
 
-### Mac/Linux Scripts
+This page shows the current status of the memory client, including:
+- Connection status to Qdrant
+- Number of stored conversations
+- Memory usage
+- Uptime
 
-- **check-mcp-status.sh**: Checks if the service is running and responding correctly
-- **install-mcp-service.sh**: Installs the MCP service as a systemd service (Linux)
-- **install-mcp-service-mac.sh**: Installs the MCP service as a launchd service (macOS)
+### Dashboards
 
-See the [scripts/README.md](scripts/README.md) for detailed information on all available scripts.
+The memory client provides two dashboards:
+
+1. **Status Dashboard** (http://localhost:9580/status)
+   - Quick overview of service status
+   - Dark mode by default
+   - Accessible via any browser
+
+2. **Full Dashboard** (http://localhost:9581)
+   - Complete conversation management
+   - Search and browse conversations
+   - Tag management
+   - Start with `memory-client dashboard`
+
+You can open both dashboards using the provided script:
+```
+scripts\open-mcp-dashboard.bat
+```
+
+For detailed information on all available scripts and their usage, see the [scripts/README.md](scripts/README.md).
 
 ### Service Troubleshooting
 
@@ -777,21 +906,6 @@ If the MCP service is not working correctly:
 2. If the service is in a PAUSED state, use `scripts/fix-mcp-service.bat` to repair it
 3. After making code changes, use `scripts/restart-mcp-service.bat` to rebuild and restart the service
 4. Check the logs in the `logs` directory for error messages
-
-### Dashboards
-
-The Memory Client provides two different dashboards:
-
-1. **MCP Service Status Page** (http://localhost:8080):
-   - Automatically available when the MCP service is running
-   - Shows basic service information like uptime, memory usage, and recent operations
-   - Useful for monitoring the health of the MCP service
-
-2. **Full Memory Dashboard** (http://localhost:8081):
-   - Started with the `memory-client dashboard` command
-   - Provides comprehensive memory visualization and management
-   - Features dark/light mode toggle
-   - Displays conversation history, project files, and detailed statistics
 
 ## Usage
 

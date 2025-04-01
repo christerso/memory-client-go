@@ -41,6 +41,7 @@ type MCPServer struct {
 	stdin          *os.File
 	stdout         *os.File
 	httpServer     *http.Server
+	apiServer      *http.Server
 	startTime      time.Time
 	requestsMu     sync.Mutex
 	requestsHandled int
@@ -84,6 +85,9 @@ func (s *MCPServer) Start(ctx context.Context) error {
 
 	// Start HTTP server for status checks and API access
 	go s.startHTTPServer(ctx)
+	
+	// Start API server for external clients
+	go s.startAPIServer(ctx)
 
 	// Log server start
 	s.logOperation("Server Start", "MCP server started", true)
@@ -224,12 +228,12 @@ func (s *MCPServer) startHTTPServer(ctx context.Context) {
 	})
 	
 	s.httpServer = &http.Server{
-		Addr:    ":8080",
+		Addr:    ":9580",
 		Handler: mux,
 	}
 	
-	log.Printf("Starting HTTP server on :8080")
-	s.logOperation("HTTP Server", "Started HTTP server on port 8080", true)
+	log.Printf("Starting HTTP server on :9580")
+	s.logOperation("HTTP Server", "Started HTTP server on port 9580", true)
 	
 	// Start the server in a goroutine
 	go func() {

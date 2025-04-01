@@ -466,7 +466,7 @@ func init() {
 	updateProjectCmd.Flags().StringP("tag", "t", "", "Tag to associate with updated files")
 	watchProjectCmd.Flags().StringP("tag", "t", "", "Tag to associate with watched files")
 	
-	dashboardCmd.Flags().IntP("port", "p", 8080, "Port to run the dashboard server on")
+	dashboardCmd.Flags().IntP("port", "p", 9581, "Port to run the dashboard server on")
 	
 	// Add commands to root command
 	rootCmd.AddCommand(addCmd)

@@ -136,8 +136,8 @@ if %errorLevel% neq 0 (
 echo.
 echo Memory Client MCP service has been restarted with the latest executable.
 echo The service will automatically start when Windows boots.
-echo Service is running on port 8080.
-echo To verify the service is working, visit: http://localhost:8080/status
+echo Service is running on port 9580.
+echo To verify the service is working, visit: http://localhost:9580/status
 echo.
 
 pause
