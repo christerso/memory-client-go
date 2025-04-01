@@ -37,9 +37,6 @@
     </td>
     <td width="50%">
       <h3>📁 Project Context</h3>
-      WARNING: This will delete ALL data from Qdrant!
-      This action cannot be undone.
-      Are you sure you want to continue? (y/N):
       <ul>
         <li>Indexes your project files</li>
         <li>Tracks file changes automatically</li>
