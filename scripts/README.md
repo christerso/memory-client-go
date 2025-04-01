@@ -169,6 +169,16 @@ Shell script to index a project directory on macOS or Linux.
 ./scripts/index-project.sh -p /path/to/project -t my-project -b 100 -m 2048
 ```
 
+## Dashboard Scripts
+
+### Windows
+
+- **open-mcp-dashboard.bat**: Opens the MCP service status page in your browser and optionally starts the full dashboard with dark/light mode
+
+### Mac/Linux
+
+- **open-mcp-dashboard.sh**: Opens the MCP service status page in your browser and optionally starts the full dashboard with dark/light mode
+
 ## Configuration Files
 
 #### windsurf-mcp-config.json
