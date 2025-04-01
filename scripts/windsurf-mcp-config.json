@@ -1,0 +1,9 @@
+{
+  "mcp_server_url": "http://localhost:8080",
+  "api_key": "",
+  "project_name": "memory-client-go",
+  "project_path": "C:/Users/christer/Desktop/memory-client-go",
+  "enable_auto_indexing": true,
+  "index_batch_size": 100,
+  "max_file_size_kb": 1024
+}

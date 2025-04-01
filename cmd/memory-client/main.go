@@ -16,6 +16,7 @@ import (
 	"github.com/christerso/memory-client-go/internal/client"
 	"github.com/christerso/memory-client-go/internal/config"
 	"github.com/christerso/memory-client-go/internal/dashboard"
+	"github.com/christerso/memory-client-go/internal/mcp"
 	"github.com/christerso/memory-client-go/internal/models"
 )
 
@@ -337,6 +338,26 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "Start the MCP server for handling memory operations",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := context.Background()
+		memClient := initClient()
+		defer memClient.Close()
+
+		fmt.Println("Starting MCP server...")
+		fmt.Println("Press Ctrl+C to stop")
+
+		// Create and start the MCP server
+		server := mcp.NewMCPServer(memClient)
+		if err := server.Start(ctx); err != nil {
+			fmt.Printf("MCP server error: %v\n", err)
+			os.Exit(1)
+		}
+	},
+}
+
 // ProcessInfo contains information about a running process
 type ProcessInfo struct {
 	PID         int
@@ -457,6 +478,7 @@ func init() {
 	rootCmd.AddCommand(watchProjectCmd)
 	rootCmd.AddCommand(dashboardCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(mcpCmd)
 }
 
 // Execute executes the root command
