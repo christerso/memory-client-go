@@ -2086,3 +2086,332 @@ func (c *MemoryClient) GetMessagesByTag(ctx context.Context, tag string, limit i
 
 	return messages, nil
 }
+
+// CheckServerStatus checks if the MCP server is running and returns its status
+func (c *MemoryClient) CheckServerStatus(ctx context.Context) (bool, string, error) {
+	// Try to connect to the MCP server
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:8080/status", nil)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: 2 * time.Second, // Short timeout for quick status check
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// Check if it's a connection error
+		if strings.Contains(err.Error(), "connection refused") || 
+		   strings.Contains(err.Error(), "dial tcp") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			return false, "MCP server is not running", nil
+		}
+		return false, "", fmt.Errorf("error connecting to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, "", fmt.Errorf("error reading response: %w", err)
+	}
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Sprintf("Server returned non-OK status: %d %s", resp.StatusCode, resp.Status), nil
+	}
+
+	return true, fmt.Sprintf("MCP server is running: %s", string(body)), nil
+}
+
+// PurgeQdrant completely purges all data from Qdrant
+func (c *MemoryClient) PurgeQdrant(ctx context.Context) error {
+	// Delete the collection
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"DELETE",
+		fmt.Sprintf("%s/collections/%s", c.qdrantURL, c.collectionName),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete collection: %s", body)
+	}
+
+	// Recreate the collection
+	err = c.ensureCollection(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to recreate collection: %w", err)
+	}
+
+	// Also delete and recreate the project collection
+	projectCollectionName := c.collectionName + "_projects"
+	req, err = http.NewRequestWithContext(
+		ctx,
+		"DELETE",
+		fmt.Sprintf("%s/collections/%s", c.qdrantURL, projectCollectionName),
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	resp, err = c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Recreate the project collection
+	err = c.ensureProjectCollection(ctx, projectCollectionName)
+	if err != nil {
+		return fmt.Errorf("failed to recreate project collection: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteMessagesByTimeRange deletes messages within a specific time range
+func (c *MemoryClient) DeleteMessagesByTimeRange(ctx context.Context, startTime, endTime time.Time) (int, error) {
+	// Prepare filter for time range
+	filter := struct {
+		Filter struct {
+			Must []struct {
+				Range struct {
+					Key     string `json:"key"`
+					GTE     *int64 `json:"gte,omitempty"`
+					LTE     *int64 `json:"lte,omitempty"`
+					GT      *int64 `json:"gt,omitempty"`
+					LT      *int64 `json:"lt,omitempty"`
+				} `json:"range"`
+			} `json:"must"`
+			MustNot struct {
+				Field struct {
+					Key   string `json:"key"`
+					Match struct {
+						Value string `json:"value"`
+					} `json:"match"`
+				} `json:"field"`
+			} `json:"must_not"`
+		} `json:"filter"`
+	}{}
+
+	// Set up the time range filter
+	filter.Filter.Must = make([]struct {
+		Range struct {
+			Key     string `json:"key"`
+			GTE     *int64 `json:"gte,omitempty"`
+			LTE     *int64 `json:"lte,omitempty"`
+			GT      *int64 `json:"gt,omitempty"`
+			LT      *int64 `json:"lt,omitempty"`
+		} `json:"range"`
+	}, 0)
+
+	// Add start time if provided
+	if !startTime.IsZero() {
+		startUnix := startTime.Unix()
+		rangeFilter := struct {
+			Range struct {
+				Key     string `json:"key"`
+				GTE     *int64 `json:"gte,omitempty"`
+				LTE     *int64 `json:"lte,omitempty"`
+				GT      *int64 `json:"gt,omitempty"`
+				LT      *int64 `json:"lt,omitempty"`
+			} `json:"range"`
+		}{
+			Range: struct {
+				Key     string `json:"key"`
+				GTE     *int64 `json:"gte,omitempty"`
+				LTE     *int64 `json:"lte,omitempty"`
+				GT      *int64 `json:"gt,omitempty"`
+				LT      *int64 `json:"lt,omitempty"`
+			}{
+				Key: "Timestamp",
+				GTE: &startUnix,
+			},
+		}
+		filter.Filter.Must = append(filter.Filter.Must, rangeFilter)
+	}
+
+	// Add end time if provided
+	if !endTime.IsZero() {
+		endUnix := endTime.Unix()
+		rangeFilter := struct {
+			Range struct {
+				Key     string `json:"key"`
+				GTE     *int64 `json:"gte,omitempty"`
+				LTE     *int64 `json:"lte,omitempty"`
+				GT      *int64 `json:"gt,omitempty"`
+				LT      *int64 `json:"lt,omitempty"`
+			} `json:"range"`
+		}{
+			Range: struct {
+				Key     string `json:"key"`
+				GTE     *int64 `json:"gte,omitempty"`
+				LTE     *int64 `json:"lte,omitempty"`
+				GT      *int64 `json:"gt,omitempty"`
+				LT      *int64 `json:"lt,omitempty"`
+			}{
+				Key: "Timestamp",
+				LTE: &endUnix,
+			},
+		}
+		filter.Filter.Must = append(filter.Filter.Must, rangeFilter)
+	}
+
+	// Exclude project files
+	filter.Filter.MustNot = struct {
+		Field struct {
+			Key   string `json:"key"`
+			Match struct {
+				Value string `json:"value"`
+			} `json:"match"`
+		} `json:"field"`
+	}{
+		Field: struct {
+			Key   string `json:"key"`
+			Match struct {
+				Value string `json:"value"`
+			} `json:"match"`
+		}{
+			Key: "Role",
+			Match: struct {
+				Value string `json:"value"`
+			}{
+				Value: string(RoleProject),
+			},
+		},
+	}
+
+	// First, get the count of messages to be deleted
+	countFilter := struct {
+		Filter struct {
+			Must []struct {
+				Range struct {
+					Key     string `json:"key"`
+					GTE     *int64 `json:"gte,omitempty"`
+					LTE     *int64 `json:"lte,omitempty"`
+					GT      *int64 `json:"gt,omitempty"`
+					LT      *int64 `json:"lt,omitempty"`
+				} `json:"range"`
+			} `json:"must"`
+			MustNot struct {
+				Field struct {
+					Key   string `json:"key"`
+					Match struct {
+						Value string `json:"value"`
+					} `json:"match"`
+				} `json:"field"`
+			} `json:"must_not"`
+		} `json:"filter"`
+	}{}
+	countFilter.Filter = filter.Filter
+
+	countBody, err := json.Marshal(countFilter)
+	if err != nil {
+		return 0, err
+	}
+
+	countReq, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		fmt.Sprintf("%s/collections/%s/points/count", c.qdrantURL, c.collectionName),
+		bytes.NewBuffer(countBody),
+	)
+	if err != nil {
+		return 0, err
+	}
+	countReq.Header.Set("Content-Type", "application/json")
+
+	countResp, err := c.httpClient.Do(countReq)
+	if err != nil {
+		return 0, err
+	}
+	defer countResp.Body.Close()
+
+	if countResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(countResp.Body)
+		return 0, fmt.Errorf("failed to count messages: %s", body)
+	}
+
+	var countResult struct {
+		Result struct {
+			Count int `json:"count"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(countResp.Body).Decode(&countResult); err != nil {
+		return 0, err
+	}
+
+	// If no messages to delete, return early
+	if countResult.Result.Count == 0 {
+		return 0, nil
+	}
+
+	// Now delete the messages
+	filterBody, err := json.Marshal(filter)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		"POST",
+		fmt.Sprintf("%s/collections/%s/points/delete", c.qdrantURL, c.collectionName),
+		bytes.NewBuffer(filterBody),
+	)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("failed to delete messages: %s", body)
+	}
+
+	return countResult.Result.Count, nil
+}
+
+// DeleteMessagesForCurrentDay deletes all messages from the current day
+func (c *MemoryClient) DeleteMessagesForCurrentDay(ctx context.Context) (int, error) {
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return c.DeleteMessagesByTimeRange(ctx, startOfDay, now)
+}
+
+// DeleteMessagesForCurrentWeek deletes all messages from the current week
+func (c *MemoryClient) DeleteMessagesForCurrentWeek(ctx context.Context) (int, error) {
+	now := time.Now()
+	// Calculate the start of the week (Monday)
+	daysToMonday := (int(now.Weekday()) - 1) % 7
+	if daysToMonday < 0 {
+		daysToMonday += 7
+	}
+	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-daysToMonday, 0, 0, 0, 0, now.Location())
+	return c.DeleteMessagesByTimeRange(ctx, startOfWeek, now)
+}
+
+// DeleteMessagesForCurrentMonth deletes all messages from the current month
+func (c *MemoryClient) DeleteMessagesForCurrentMonth(ctx context.Context) (int, error) {
+	now := time.Now()
+	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	return c.DeleteMessagesByTimeRange(ctx, startOfMonth, now)
+}

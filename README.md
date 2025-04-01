@@ -3,6 +3,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.20+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20DB-FF4F8B?style=flat-square)](https://qdrant.tech)
 [![MCP](https://img.shields.io/badge/MCP-Protocol-4B32C3?style=flat-square)](https://github.com/roo-cline/mcp)
+[![Version](https://img.shields.io/badge/Version-1.2.0-success?style=flat-square)](https://github.com/roo-cline/memory-client-go)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 > A Go-based memory client for the Model Context Protocol (MCP) that provides persistent conversation storage and project context using Qdrant vector database. This client enables Cline/Roo to maintain conversation history and project knowledge across sessions **automatically and seamlessly in the background**.
@@ -14,8 +15,10 @@
 - [Installation](#-installation)
 - [Project Memory](#-project-memory)
 - [Usage](#-usage)
+- [Data Management](#-data-management)
 - [MCP API Reference](#-mcp-api-reference)
 - [Configuration](#-configuration)
+- [Author](#-author)
 - [License](#-license)
 
 ## ✨ Features
@@ -258,7 +261,90 @@ memory-client search "query"
 </td>
 <td>Search conversation memory</td>
 </tr>
+<tr>
+<td>
+
+```bash
+memory-client status
+```
+
+</td>
+<td>Check if the MCP server is running</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client version
+```
+
+</td>
+<td>Display version information</td>
+</tr>
 </table>
+
+## 🧹 Data Management
+
+The memory client provides several commands to manage your data and maintain your Qdrant database:
+
+<table>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client purge
+```
+
+</td>
+<td>Completely purge all data from Qdrant (requires confirmation)</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client clear day
+```
+
+</td>
+<td>Delete all messages from the current day</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client clear week
+```
+
+</td>
+<td>Delete all messages from the current week (Monday to now)</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client clear month
+```
+
+</td>
+<td>Delete all messages from the current month (1st to now)</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client clear range --from 2025-01-01 --to 2025-01-31
+```
+
+</td>
+<td>Delete messages within a specific date range (YYYY-MM-DD format)</td>
+</tr>
+</table>
+
+These commands help you manage your conversation history and maintain your database size. The `purge` command is useful for completely resetting your database, while the `clear` commands allow for more targeted data cleanup.
 
 ## 🔌 MCP API Reference
 
@@ -385,6 +471,10 @@ EMBEDDING_SIZE: 384
 Configuration locations:
 - Windows: `%APPDATA%\memory-client\config.yaml`
 - Linux/macOS: `~/.config/memory-client/config.yaml`
+
+## 👤 Author
+
+**Christer Söderlund** - *Lead Developer*
 
 ## 📄 License
 

@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"sync"
 	"syscall"
+	"time"
 )
 
 // MemoryClientInterface defines the interface for memory client operations
@@ -30,17 +35,34 @@ type MemoryClientInterface interface {
 
 // MCPServer represents the MCP server implementation
 type MCPServer struct {
-	client MemoryClientInterface
-	stdin  *os.File
-	stdout *os.File
+	client         MemoryClientInterface
+	stdin          *os.File
+	stdout         *os.File
+	httpServer     *http.Server
+	startTime      time.Time
+	requestsMu     sync.Mutex
+	requestsHandled int
+	recentOps      []OperationLog
+	recentOpsMu    sync.Mutex
+	maxRecentOps   int
+}
+
+// OperationLog represents a log of a recent operation
+type OperationLog struct {
+	Timestamp time.Time
+	Operation string
+	Details   string
+	Success   bool
 }
 
 // NewMCPServer creates a new MCP server
 func NewMCPServer(client MemoryClientInterface) *MCPServer {
 	return &MCPServer{
-		client: client,
-		stdin:  os.Stdin,
-		stdout: os.Stdout,
+		client:       client,
+		stdin:        os.Stdin,
+		stdout:       os.Stdout,
+		startTime:    time.Now(),
+		maxRecentOps: 50, // Keep track of last 50 operations
 	}
 }
 
@@ -58,6 +80,12 @@ func (s *MCPServer) Start(ctx context.Context) error {
 		cancel()
 	}()
 
+	// Start HTTP server for status checks and API access
+	go s.startHTTPServer(ctx)
+
+	// Log server start
+	s.logOperation("Server Start", "MCP server started", true)
+
 	// Send server info
 	err := s.sendServerInfo()
 	if err != nil {
@@ -69,281 +97,385 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			s.logOperation("Server Shutdown", "MCP server shutting down", true)
 			return ctx.Err()
 		default:
 			var request MCPRequest
 			err := decoder.Decode(&request)
 			if err != nil {
 				log.Printf("Error decoding request: %v", err)
+				s.logOperation("Request Decode", fmt.Sprintf("Failed to decode request: %v", err), false)
 				continue
 			}
+
+			// Log the incoming request
+			s.logOperation("Request Received", fmt.Sprintf("Type: %s", request.Type), true)
 
 			response, err := s.handleRequest(ctx, &request)
 			if err != nil {
 				log.Printf("Error handling request: %v", err)
+				s.logOperation("Request Handling", fmt.Sprintf("Failed to handle request of type %s: %v", request.Type, err), false)
 				s.sendErrorResponse(request.ID, err)
 				continue
 			}
 
+			// Log the successful response
+			s.logOperation("Response Sent", fmt.Sprintf("Type: %s, Success: true", request.Type), true)
+
 			err = s.sendResponse(response)
 			if err != nil {
 				log.Printf("Error sending response: %v", err)
+				s.logOperation("Response Sending", fmt.Sprintf("Failed to send response: %v", err), false)
 			}
+			
+			// Increment request counter
+			s.requestsMu.Lock()
+			s.requestsHandled++
+			s.requestsMu.Unlock()
 		}
 	}
 }
 
-// sendServerInfo sends the server info to the client
-func (s *MCPServer) sendServerInfo() error {
-	serverInfo := MCPServerInfo{
-		Name:        "memory-server",
-		Version:     "1.0.0",
-		Description: "Memory server for conversation history",
-		Tools: []MCPTool{
-			{
-				Name:        "add_message",
-				Description: "Add a message to the conversation history",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"role": {
-							"type": "string",
-							"enum": ["user", "assistant", "system"],
-							"description": "Role of the message sender"
-						},
-						"content": {
-							"type": "string",
-							"description": "Content of the message"
-						}
-					},
-					"required": ["role", "content"]
-				}`),
-			},
-			{
-				Name:        "get_conversation_history",
-				Description: "Retrieve the conversation history",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of messages to retrieve"
-						}
-					}
-				}`),
-			},
-			{
-				Name:        "search_similar_messages",
-				Description: "Search for messages similar to a query",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "Query text to search for similar messages"
-						},
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of similar messages to retrieve"
-						}
-					},
-					"required": ["query"]
-				}`),
-			},
-			{
-				Name:        "index_project",
-				Description: "Index files in a project directory",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"path": {
-							"type": "string",
-							"description": "Path to the project directory"
-						},
-						"verbose": {
-							"type": "boolean",
-							"description": "Show detailed progress information"
-						}
-					},
-					"required": ["path"]
-				}`),
-			},
-			{
-				Name:        "update_project",
-				Description: "Update modified files in a project directory",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"path": {
-							"type": "string",
-							"description": "Path to the project directory"
-						},
-						"verbose": {
-							"type": "boolean",
-							"description": "Show detailed progress information"
-						}
-					},
-					"required": ["path"]
-				}`),
-			},
-			{
-				Name:        "search_project_files",
-				Description: "Search for files in the project",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "Query text to search for in project files"
-						},
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of files to retrieve"
-						}
-					},
-					"required": ["query"]
-				}`),
-			},
-			{
-				Name:        "get_memory_stats",
-				Description: "Get statistics about memory usage",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {}
-				}`),
-			},
-			{
-				Name:        "delete_message",
-				Description: "Delete a message from the conversation history by ID",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"id": {
-							"type": "string",
-							"description": "ID of the message to delete"
-						}
-					},
-					"required": ["id"]
-				}`),
-			},
-			{
-				Name:        "delete_all_messages",
-				Description: "Delete all messages from the conversation history",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {}
-				}`),
-			},
-			{
-				Name:        "delete_project_file",
-				Description: "Delete a project file by path",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"path": {
-							"type": "string",
-							"description": "Path of the file to delete"
-						}
-					},
-					"required": ["path"]
-				}`),
-			},
-			{
-				Name:        "delete_all_project_files",
-				Description: "Delete all project files",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {}
-				}`),
-			},
-			{
-				Name:        "tag_messages",
-				Description: "Add tags to messages matching a query",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "Query text to search for messages to tag"
-						},
-						"tags": {
-							"type": "array",
-							"items": {
-								"type": "string"
-							},
-							"description": "Tags to add to the matching messages"
-						},
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of messages to tag"
-						}
-					},
-					"required": ["query", "tags"]
-				}`),
-			},
-			{
-				Name:        "summarize_and_tag_messages",
-				Description: "Summarize and tag messages matching a query",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "Query text to search for messages to summarize and tag"
-						},
-						"summary": {
-							"type": "string",
-							"description": "Summary to add to the matching messages"
-						},
-						"tags": {
-							"type": "array",
-							"items": {
-								"type": "string"
-							},
-							"description": "Tags to add to the matching messages"
-						},
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of messages to summarize and tag"
-						}
-					},
-					"required": ["query", "summary", "tags"]
-				}`),
-			},
-			{
-				Name:        "get_messages_by_tag",
-				Description: "Retrieve messages with a specific tag",
-				InputSchema: json.RawMessage(`{
-					"type": "object",
-					"properties": {
-						"tag": {
-							"type": "string",
-							"description": "Tag to search for"
-						},
-						"limit": {
-							"type": "number",
-							"description": "Maximum number of messages to retrieve"
-						}
-					},
-					"required": ["tag"]
-				}`),
-			},
-		},
-		Resources: []MCPResource{
-			{
-				URI:         "memory:///conversation_history",
-				Name:        "Conversation History",
-				Description: "Complete history of the conversation",
-			},
-			{
-				URI:         "memory:///project_files",
-				Name:        "Project Files",
-				Description: "Source code and other files from the current project",
-			},
-		},
+// logOperation logs an operation to the recent operations list
+func (s *MCPServer) logOperation(operation, details string, success bool) {
+	s.recentOpsMu.Lock()
+	defer s.recentOpsMu.Unlock()
+	
+	// Add new operation log
+	s.recentOps = append(s.recentOps, OperationLog{
+		Timestamp: time.Now(),
+		Operation: operation,
+		Details:   details,
+		Success:   success,
+	})
+	
+	// Trim if exceeding max size
+	if len(s.recentOps) > s.maxRecentOps {
+		s.recentOps = s.recentOps[len(s.recentOps)-s.maxRecentOps:]
 	}
+}
 
-	return json.NewEncoder(s.stdout).Encode(serverInfo)
+// getRecentOperations returns the recent operations
+func (s *MCPServer) getRecentOperations() []OperationLog {
+	s.recentOpsMu.Lock()
+	defer s.recentOpsMu.Unlock()
+	
+	// Return a copy to avoid race conditions
+	result := make([]OperationLog, len(s.recentOps))
+	copy(result, s.recentOps)
+	
+	// Reverse the order so newest are first
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	
+	return result
+}
+
+// startHTTPServer starts the HTTP server for status checks and API access
+func (s *MCPServer) startHTTPServer(ctx context.Context) {
+	mux := http.NewServeMux()
+	
+	// Add status endpoint for JSON API
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		s.requestsMu.Lock()
+		requestCount := s.requestsHandled
+		s.requestsMu.Unlock()
+		
+		uptime := time.Since(s.startTime).Round(time.Second)
+		
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+		
+		status := map[string]interface{}{
+			"status":           "running",
+			"uptime":           uptime.String(),
+			"start_time":       s.startTime.Format(time.RFC3339),
+			"requests_handled": requestCount,
+			"memory_usage_mb":  float64(memStats.Alloc) / 1024 / 1024,
+			"goroutines":       runtime.NumGoroutine(),
+			"recent_operations": s.getRecentOperations(),
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(status)
+	})
+	
+	// Add health check endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	
+	// Add web UI status page
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		s.serveStatusPage(w, r)
+	})
+	
+	// Redirect root to status page
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/status", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	
+	s.httpServer = &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+	
+	log.Printf("Starting HTTP server on :8080")
+	s.logOperation("HTTP Server", "Started HTTP server on port 8080", true)
+	
+	// Start the server in a goroutine
+	go func() {
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+			s.logOperation("HTTP Server", fmt.Sprintf("HTTP server error: %v", err), false)
+		}
+	}()
+	
+	// Shutdown the server when context is done
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		
+		log.Printf("Shutting down HTTP server")
+		s.logOperation("HTTP Server", "Shutting down HTTP server", true)
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+			s.logOperation("HTTP Server", fmt.Sprintf("HTTP server shutdown error: %v", err), false)
+		}
+	}()
+}
+
+// serveStatusPage serves the HTML status page
+func (s *MCPServer) serveStatusPage(w http.ResponseWriter, r *http.Request) {
+	s.requestsMu.Lock()
+	requestCount := s.requestsHandled
+	s.requestsMu.Unlock()
+	
+	uptime := time.Since(s.startTime).Round(time.Second)
+	
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	
+	// Get memory stats
+	memoryUsageMB := float64(memStats.Alloc) / 1024 / 1024
+	
+	// Get recent operations
+	recentOps := s.getRecentOperations()
+	
+	// Create data for template
+	data := map[string]interface{}{
+		"Status":          "Running",
+		"Uptime":          uptime.String(),
+		"StartTime":       s.startTime.Format(time.RFC3339),
+		"RequestsHandled": requestCount,
+		"MemoryUsageMB":   fmt.Sprintf("%.2f", memoryUsageMB),
+		"Goroutines":      runtime.NumGoroutine(),
+		"RecentOps":       recentOps,
+		"RefreshTime":     time.Now().Format(time.RFC3339),
+	}
+	
+	// HTML template for the status page
+	tmpl := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MCP Server Status</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .card {
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .status-item {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .status-label {
+            font-weight: bold;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        .status-value {
+            font-size: 1.4em;
+            color: #2c3e50;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+        .success {
+            color: #27ae60;
+        }
+        .failure {
+            color: #e74c3c;
+        }
+        .refresh-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .refresh-button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .refresh-button:hover {
+            background-color: #2980b9;
+        }
+        .last-refresh {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        @media (max-width: 768px) {
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    <script>
+        // Auto-refresh the page every 5 seconds
+        function setupAutoRefresh() {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        }
+        
+        window.onload = function() {
+            setupAutoRefresh();
+        };
+    </script>
+</head>
+<body>
+    <div class="card">
+        <h1>MCP Server Status</h1>
+        
+        <div class="refresh-bar">
+            <button class="refresh-button" onclick="window.location.reload();">Refresh Now</button>
+            <span class="last-refresh">Last refreshed: {{.RefreshTime}}</span>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-item">
+                <div class="status-label">Status</div>
+                <div class="status-value">{{.Status}}</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Uptime</div>
+                <div class="status-value">{{.Uptime}}</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Start Time</div>
+                <div class="status-value">{{.StartTime}}</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Requests Handled</div>
+                <div class="status-value">{{.RequestsHandled}}</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Memory Usage</div>
+                <div class="status-value">{{.MemoryUsageMB}} MB</div>
+            </div>
+            <div class="status-item">
+                <div class="status-label">Goroutines</div>
+                <div class="status-value">{{.Goroutines}}</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Recent Operations</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Operation</th>
+                    <th>Details</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{range .RecentOps}}
+                <tr>
+                    <td>{{.Timestamp.Format "15:04:05"}}</td>
+                    <td>{{.Operation}}</td>
+                    <td>{{.Details}}</td>
+                    <td class="{{if .Success}}success{{else}}failure{{end}}">
+                        {{if .Success}}Success{{else}}Failed{{end}}
+                    </td>
+                </tr>
+                {{else}}
+                <tr>
+                    <td colspan="4">No operations recorded yet</td>
+                </tr>
+                {{end}}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
+`
+	
+	// Parse and execute the template
+	t, err := template.New("status").Parse(tmpl)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing template: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	err = t.Execute(w, data)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error executing template: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleRequest handles an MCP request
@@ -991,6 +1123,259 @@ func (s *MCPServer) sendErrorResponse(requestID string, err error) error {
 // sendResponse sends a response
 func (s *MCPServer) sendResponse(response *MCPResponse) error {
 	return json.NewEncoder(s.stdout).Encode(response)
+}
+
+// sendServerInfo sends the server info to the client
+func (s *MCPServer) sendServerInfo() error {
+	serverInfo := MCPServerInfo{
+		Name:        "memory-server",
+		Version:     "1.0.0",
+		Description: "Memory server for conversation history",
+		Tools: []MCPTool{
+			{
+				Name:        "add_message",
+				Description: "Add a message to the conversation history",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"role": {
+							"type": "string",
+							"enum": ["user", "assistant", "system"],
+							"description": "Role of the message sender"
+						},
+						"content": {
+							"type": "string",
+							"description": "Content of the message"
+						}
+					},
+					"required": ["role", "content"]
+				}`),
+			},
+			{
+				Name:        "get_conversation_history",
+				Description: "Retrieve the conversation history",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of messages to retrieve"
+						}
+					}
+				}`),
+			},
+			{
+				Name:        "search_similar_messages",
+				Description: "Search for messages similar to a query",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Query text to search for similar messages"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of similar messages to retrieve"
+						}
+					},
+					"required": ["query"]
+				}`),
+			},
+			{
+				Name:        "index_project",
+				Description: "Index files in a project directory",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Path to the project directory"
+						},
+						"verbose": {
+							"type": "boolean",
+							"description": "Show detailed progress information"
+						}
+					},
+					"required": ["path"]
+				}`),
+			},
+			{
+				Name:        "update_project",
+				Description: "Update modified files in a project directory",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Path to the project directory"
+						},
+						"verbose": {
+							"type": "boolean",
+							"description": "Show detailed progress information"
+						}
+					},
+					"required": ["path"]
+				}`),
+			},
+			{
+				Name:        "search_project_files",
+				Description: "Search for files in the project",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Query text to search for in project files"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of files to retrieve"
+						}
+					},
+					"required": ["query"]
+				}`),
+			},
+			{
+				Name:        "get_memory_stats",
+				Description: "Get statistics about memory usage",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {}
+				}`),
+			},
+			{
+				Name:        "delete_message",
+				Description: "Delete a message from the conversation history by ID",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "ID of the message to delete"
+						}
+					},
+					"required": ["id"]
+				}`),
+			},
+			{
+				Name:        "delete_all_messages",
+				Description: "Delete all messages from the conversation history",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {}
+				}`),
+			},
+			{
+				Name:        "delete_project_file",
+				Description: "Delete a project file by path",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Path of the file to delete"
+						}
+					},
+					"required": ["path"]
+				}`),
+			},
+			{
+				Name:        "delete_all_project_files",
+				Description: "Delete all project files",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {}
+				}`),
+			},
+			{
+				Name:        "tag_messages",
+				Description: "Add tags to messages matching a query",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Query text to search for messages to tag"
+						},
+						"tags": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "Tags to add to the matching messages"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of messages to tag"
+						}
+					},
+					"required": ["query", "tags"]
+				}`),
+			},
+			{
+				Name:        "summarize_and_tag_messages",
+				Description: "Summarize and tag messages matching a query",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Query text to search for messages to summarize and tag"
+						},
+						"summary": {
+							"type": "string",
+							"description": "Summary to add to the matching messages"
+						},
+						"tags": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "Tags to add to the matching messages"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of messages to summarize and tag"
+						}
+					},
+					"required": ["query", "summary", "tags"]
+				}`),
+			},
+			{
+				Name:        "get_messages_by_tag",
+				Description: "Retrieve messages with a specific tag",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"tag": {
+							"type": "string",
+							"description": "Tag to search for"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of messages to retrieve"
+						}
+					},
+					"required": ["tag"]
+				}`),
+			},
+		},
+		Resources: []MCPResource{
+			{
+				URI:         "memory:///conversation_history",
+				Name:        "Conversation History",
+				Description: "Complete history of the conversation",
+			},
+			{
+				URI:         "memory:///project_files",
+				Name:        "Project Files",
+				Description: "Source code and other files from the current project",
+			},
+		},
+	}
+
+	return json.NewEncoder(s.stdout).Encode(serverInfo)
 }
 
 // MCP protocol types
