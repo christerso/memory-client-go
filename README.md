@@ -15,6 +15,7 @@
 - [Installation](#-installation)
 - [Project Memory](#-project-memory)
 - [Usage](#-usage)
+- [Advanced Usage Examples](#-advanced-usage-examples)
 - [Data Management](#-data-management)
 - [MCP API Reference](#-mcp-api-reference)
 - [Configuration](#-configuration)
@@ -200,17 +201,7 @@ memory-client watch-project --tag "project-name"
 ```
 
 </td>
-<td>Monitor files with a specific tag for better organization</td>
-</tr>
-<tr>
-<td>
-
-```bash
-memory-client search-project "query"
-```
-
-</td>
-<td>Search for content in project files</td>
+<td>Watch a project directory with a specific tag</td>
 </tr>
 </table>
 
@@ -245,9 +236,7 @@ memory-client watch-project --path /path/to/repo --tag "my-project"
 
 Tags are stored in the vector database along with the file content, making it easier to retrieve related files later.
 
-## 🔍 Usage
-
-### Command Line Interface
+## 🚀 Usage
 
 <table>
 <tr>
@@ -268,21 +257,11 @@ memory-client mcp
 <td>
 
 ```bash
-memory-client serve
+memory-client dashboard
 ```
 
 </td>
-<td>Start the memory server in daemon mode</td>
-</tr>
-<tr>
-<td>
-
-```bash
-memory-client add user "message"
-```
-
-</td>
-<td>Add a user message to memory</td>
+<td>Start the memory dashboard</td>
 </tr>
 <tr>
 <td>
@@ -292,7 +271,7 @@ memory-client history
 ```
 
 </td>
-<td>Show conversation history</td>
+<td>View conversation history</td>
 </tr>
 <tr>
 <td>
@@ -302,17 +281,17 @@ memory-client search "query"
 ```
 
 </td>
-<td>Search conversation memory</td>
+<td>Search for messages or files</td>
 </tr>
 <tr>
 <td>
 
 ```bash
-memory-client status
+memory-client add user "message"
 ```
 
 </td>
-<td>Check if the MCP server is running</td>
+<td>Add a message to conversation history</td>
 </tr>
 <tr>
 <td>
@@ -323,6 +302,264 @@ memory-client version
 
 </td>
 <td>Display version information</td>
+</tr>
+</table>
+
+## 🔍 Advanced Usage Examples
+
+### Conversation Management
+
+<table>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>Add a user message</td>
+<td>
+
+```bash
+memory-client add user "How do I implement a binary search tree?"
+```
+
+</td>
+<td>Adds a user message to the conversation history</td>
+</tr>
+<tr>
+<td>Add an assistant message</td>
+<td>
+
+```bash
+memory-client add assistant "Here's how to implement a binary search tree in Go..."
+```
+
+</td>
+<td>Adds an assistant message to the conversation history</td>
+</tr>
+<tr>
+<td>View recent conversation</td>
+<td>
+
+```bash
+memory-client history --limit 10
+```
+
+</td>
+<td>Shows the 10 most recent messages in the conversation</td>
+</tr>
+<tr>
+<td>Search conversations</td>
+<td>
+
+```bash
+memory-client search "binary search tree" --limit 5
+```
+
+</td>
+<td>Finds up to 5 messages related to binary search trees</td>
+</tr>
+<tr>
+<td>Tag conversations</td>
+<td>
+
+```bash
+memory-client tag --query "golang error handling" --tags "golang,errors,best-practices"
+```
+
+</td>
+<td>Tags messages about Golang error handling for easier retrieval</td>
+</tr>
+<tr>
+<td>Get messages by tag</td>
+<td>
+
+```bash
+memory-client get-by-tag "golang"
+```
+
+</td>
+<td>Retrieves all messages tagged with "golang"</td>
+</tr>
+</table>
+
+### Project Management
+
+<table>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>Index a specific project</td>
+<td>
+
+```bash
+memory-client index-project --project "/path/to/project" --tag "my-project"
+```
+
+</td>
+<td>Indexes all files in the specified directory with a tag</td>
+</tr>
+<tr>
+<td>Watch multiple projects</td>
+<td>
+
+```bash
+# In separate terminals:
+memory-client watch-project --project "/path/to/project1" --tag "project1"
+memory-client watch-project --project "/path/to/project2" --tag "project2"
+```
+
+</td>
+<td>Watches multiple projects simultaneously, each with its own tag</td>
+</tr>
+<tr>
+<td>Search within a project</td>
+<td>
+
+```bash
+memory-client search "database connection" --tag "my-project"
+```
+
+</td>
+<td>Searches only within files tagged with "my-project"</td>
+</tr>
+<tr>
+<td>Batch index with filters</td>
+<td>
+
+```bash
+# Use the provided scripts for more advanced indexing:
+./scripts/index-project.sh --project "/path/to/project" --tag "my-project" --max-file-size 2048
+```
+
+</td>
+<td>Indexes a project with custom file size limits and batch processing</td>
+</tr>
+</table>
+
+### System Management
+
+<table>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>Add to PATH</td>
+<td>
+
+```bash
+# Windows PowerShell:
+./scripts/add-to-path.ps1
+
+# Linux/macOS:
+./scripts/add-to-path.sh
+```
+
+</td>
+<td>Adds memory-client to your PATH for easier access from any terminal</td>
+</tr>
+<tr>
+<td>Run as system service</td>
+<td>
+
+```bash
+# Windows (as Administrator):
+./scripts/install-mcp-service.ps1
+
+# Linux (as root):
+sudo ./scripts/install-mcp-service.sh
+
+# macOS:
+./scripts/install-mcp-service-mac.sh
+```
+
+</td>
+<td>Installs memory-client as a system service that starts automatically</td>
+</tr>
+<tr>
+<td>Check memory stats</td>
+<td>
+
+```bash
+memory-client stats
+```
+
+</td>
+<td>Shows statistics about memory usage, including vector counts and storage</td>
+</tr>
+<tr>
+<td>Run dashboard</td>
+<td>
+
+```bash
+memory-client dashboard --port 8082
+```
+
+</td>
+<td>Runs the memory dashboard on a custom port</td>
+</tr>
+</table>
+
+### Data Cleanup
+
+<table>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Description</th>
+</tr>
+<tr>
+<td>Clear recent messages</td>
+<td>
+
+```bash
+memory-client clear day
+```
+
+</td>
+<td>Deletes all messages from the current day</td>
+</tr>
+<tr>
+<td>Clear older messages</td>
+<td>
+
+```bash
+memory-client clear week
+```
+
+</td>
+<td>Deletes all messages from the current week (Monday to now)</td>
+</tr>
+<tr>
+<td>Delete specific message</td>
+<td>
+
+```bash
+# First find the message ID:
+memory-client search "query to find message"
+
+# Then delete by ID:
+memory-client delete-message "message-id-12345"
+```
+
+</td>
+<td>Deletes a specific message by its ID</td>
+</tr>
+<tr>
+<td>Reset everything</td>
+<td>
+
+```bash
+memory-client purge
+```
+
+</td>
+<td>Completely purges all data from Qdrant (requires confirmation)</td>
 </tr>
 </table>
 
@@ -514,6 +751,35 @@ EMBEDDING_SIZE: 384
 Configuration locations:
 - Windows: `%APPDATA%\memory-client\config.yaml`
 - Linux/macOS: `~/.config/memory-client/config.yaml`
+
+## MCP Service Management
+
+The Memory Client MCP service provides persistent conversation storage for Windsurf IDE. Several scripts are available to help manage the service:
+
+### Windows Scripts
+
+- **restart-mcp-service.bat**: Stops, rebuilds, and restarts the MCP service with the latest code
+- **check-mcp-status.bat**: Checks if the service is running and responding correctly
+- **fix-mcp-service.bat**: Fixes issues with the service by checking version and reinstalling if necessary
+- **install-mcp-service.bat**: Installs the MCP service as a Windows service (requires NSSM)
+- **uninstall-mcp-service.bat**: Properly removes the MCP service
+
+### Mac/Linux Scripts
+
+- **check-mcp-status.sh**: Checks if the service is running and responding correctly
+- **install-mcp-service.sh**: Installs the MCP service as a systemd service (Linux)
+- **install-mcp-service-mac.sh**: Installs the MCP service as a launchd service (macOS)
+
+See the [scripts/README.md](scripts/README.md) for detailed information on all available scripts.
+
+### Service Troubleshooting
+
+If the MCP service is not working correctly:
+
+1. Check the service status: `scripts/check-mcp-status.bat` (Windows) or `scripts/check-mcp-status.sh` (Mac/Linux)
+2. If the service is in a PAUSED state, use `scripts/fix-mcp-service.bat` to repair it
+3. After making code changes, use `scripts/restart-mcp-service.bat` to rebuild and restart the service
+4. Check the logs in the `logs` directory for error messages
 
 ## 👤 Author
 
