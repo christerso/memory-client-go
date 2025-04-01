@@ -778,6 +778,45 @@ If the MCP service is not working correctly:
 3. After making code changes, use `scripts/restart-mcp-service.bat` to rebuild and restart the service
 4. Check the logs in the `logs` directory for error messages
 
+### Dashboards
+
+The Memory Client provides two different dashboards:
+
+1. **MCP Service Status Page** (http://localhost:8080):
+   - Automatically available when the MCP service is running
+   - Shows basic service information like uptime, memory usage, and recent operations
+   - Useful for monitoring the health of the MCP service
+
+2. **Full Memory Dashboard** (http://localhost:8081):
+   - Started with the `memory-client dashboard` command
+   - Provides comprehensive memory visualization and management
+   - Features dark/light mode toggle
+   - Displays conversation history, project files, and detailed statistics
+
+## Usage
+
+### Command Line Interface
+
+```bash
+# Add a message to memory
+memory-client add user "Hello, how are you?"
+
+# Search for similar messages
+memory-client search "greeting"
+
+# Show conversation history
+memory-client history 10
+
+# Index a project directory
+memory-client index-project --path /path/to/project --tag my-project
+
+# Start the MCP server
+memory-client mcp
+
+# Run the full dashboard
+memory-client dashboard
+```
+
 ## 👤 Author
 
 **Christer Söderlund** - *Lead Developer*
