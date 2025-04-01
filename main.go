@@ -97,16 +97,16 @@ var serveCmd = &cobra.Command{
 
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
-	Short: "Start as MCP server",
+	Short: "Start the MCP server for handling memory operations",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
 		memClient := initClient()
 		defer memClient.Close()
 
-		if verbose {
-			fmt.Println("Starting MCP memory server...")
-		}
+		fmt.Println("Starting MCP server...")
+		fmt.Println("Press Ctrl+C to stop")
 
+		// Create and start the MCP server
 		server := mcp.NewMCPServer(memClient)
 		if err := server.Start(ctx); err != nil {
 			if verbose {
@@ -592,6 +592,7 @@ func init() {
 	rootCmd.AddCommand(purgeCmd)
 	rootCmd.AddCommand(clearCmd)
 	rootCmd.AddCommand(dashboardCmd)
+	rootCmd.AddCommand(mcpCmd) // Add the MCP command to the rootCmd
 
 	// Add flags
 	addCmd.Flags().StringVarP(&role, "role", "r", "user", "Role (user, assistant, system, project)")
