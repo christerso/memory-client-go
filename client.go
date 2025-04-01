@@ -378,8 +378,8 @@ func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string)
 		return 0, fmt.Errorf("failed to ensure project collection: %w", err)
 	}
 
-	// First, count the total number of files to process
-	var totalFiles int
+	// First, collect all eligible files to process
+	var filesToProcess []string
 	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -408,103 +408,124 @@ func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string)
 			return nil
 		}
 
-		totalFiles++
+		filesToProcess = append(filesToProcess, path)
 		return nil
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("error counting files: %w", err)
+		return 0, fmt.Errorf("error walking directory: %w", err)
 	}
 
+	totalFiles := len(filesToProcess)
 	fmt.Printf("Found %d files to index\n", totalFiles)
 
-	// Now index the files with progress reporting
+	// Process files in batches
+	const batchSize = 100
 	var count int
 	var lastPercent int
-	err = filepath.Walk(absPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+
+	for i := 0; i < totalFiles; i += batchSize {
+		end := i + batchSize
+		if end > totalFiles {
+			end = totalFiles
 		}
 
-		// Skip directories
-		if info.IsDir() {
-			return nil
+		batch := filesToProcess[i:end]
+		for _, path := range batch {
+			// Create a context with timeout for each file
+			fileCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			
+			// Read file content
+			info, err := os.Stat(path)
+			if err != nil {
+				cancel()
+				continue // Skip files we can't stat
+			}
+			
+			content, err := os.ReadFile(path)
+			if err != nil {
+				cancel()
+				continue // Skip files we can't read
+			}
+
+			// Get relative path
+			relPath, err := filepath.Rel(absPath, path)
+			if err != nil {
+				relPath = path // Use absolute path if relative path fails
+			}
+
+			// Determine language
+			ext := strings.ToLower(filepath.Ext(path))
+			language := "Unknown"
+			if lang, ok := LanguageMap[ext]; ok {
+				language = lang
+			}
+
+			// Create project file
+			projectFile := &ProjectFile{
+				Path:     relPath,
+				Content:  string(content),
+				Language: language,
+				Vector:   make([]float32, c.embeddingSize),
+				ModTime:  info.ModTime().Unix(), // Store modification time
+			}
+
+			// Generate random vector for now
+			// In a real implementation, you would use an embedding service
+			for i := range projectFile.Vector {
+				projectFile.Vector[i] = rand.Float32()
+			}
+
+			// Add to Qdrant with retry logic
+			var addErr error
+			for retries := 0; retries < 3; retries++ {
+				addErr = c.addProjectFile(fileCtx, projectCollection, projectFile)
+				if addErr == nil {
+					break
+				}
+				
+				// If context deadline exceeded, wait a bit and retry
+				if strings.Contains(addErr.Error(), "context deadline exceeded") || 
+				   strings.Contains(addErr.Error(), "connection refused") {
+					time.Sleep(time.Duration(retries+1) * 500 * time.Millisecond)
+					continue
+				}
+				
+				// For other errors, don't retry
+				break
+			}
+			
+			cancel() // Release the file context
+			
+			if addErr != nil {
+				// Log the error but continue with other files
+				fmt.Printf("Error indexing file %s: %v\n", relPath, addErr)
+				continue
+			}
+
+			count++
+
+			// Report progress
+			percent := (count * 100) / totalFiles
+			if percent > lastPercent {
+				fmt.Printf("Indexing progress: %d%% (%d/%d files)\n", percent, count, totalFiles)
+				lastPercent = percent
+			}
+			
+			// Check if the main context is done
+			select {
+			case <-ctx.Done():
+				return count, fmt.Errorf("indexing interrupted: %w", ctx.Err())
+			default:
+				// Continue processing
+			}
 		}
-
-		// Get file extension
-		ext := strings.ToLower(filepath.Ext(path))
-
-		// Skip media and binary files
-		if MediaExtensions[ext] || BinaryExtensions[ext] {
-			return nil
-		}
-
-		// Skip files larger than 1MB
-		if info.Size() > 1024*1024 {
-			return nil
-		}
-
-		// Skip hidden files and directories
-		if strings.HasPrefix(filepath.Base(path), ".") {
-			return nil
-		}
-
-		// Read file content
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil // Skip files we can't read
-		}
-
-		// Get relative path
-		relPath, err := filepath.Rel(absPath, path)
-		if err != nil {
-			relPath = path // Use absolute path if relative path fails
-		}
-
-		// Determine language
-		language := "Unknown"
-		if lang, ok := LanguageMap[ext]; ok {
-			language = lang
-		}
-
-		// Create project file
-		projectFile := &ProjectFile{
-			Path:     relPath,
-			Content:  string(content),
-			Language: language,
-			Vector:   make([]float32, c.embeddingSize),
-			ModTime:  info.ModTime().Unix(), // Store modification time
-		}
-
-		// Generate random vector for now
-		// In a real implementation, you would use an embedding service
-		for i := range projectFile.Vector {
-			projectFile.Vector[i] = rand.Float32()
-		}
-
-		// Add to Qdrant
-		err = c.addProjectFile(ctx, projectCollection, projectFile)
-		if err != nil {
-			return err
-		}
-
-		count++
-
-		// Report progress
-		percent := (count * 100) / totalFiles
-		if percent > lastPercent {
-			fmt.Printf("Indexing progress: %d%% (%d/%d files)\n", percent, count, totalFiles)
-			lastPercent = percent
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return count, fmt.Errorf("error walking directory: %w", err)
 	}
 
-	fmt.Printf("Indexing complete: %d files indexed\n", count)
+	if count == 0 && totalFiles > 0 {
+		return 0, fmt.Errorf("failed to index any files")
+	}
+
 	return count, nil
 }
 

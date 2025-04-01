@@ -90,7 +90,8 @@ var indexProjectCmd = &cobra.Command{
 	Short: "Index project files in a directory",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Increase timeout to 10 minutes for large projects
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
 		client := initClient()
@@ -123,7 +124,8 @@ var updateProjectCmd = &cobra.Command{
 	Short: "Update modified project files in a directory",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Increase timeout to 10 minutes for large projects
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
 		client := initClient()
