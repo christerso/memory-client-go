@@ -202,7 +202,7 @@ func (m *MockMemoryClient) GetMessagesByTag(ctx context.Context, tag string, lim
 }
 
 // IndexProjectFiles implements MemoryClientInterface
-func (m *MockMemoryClient) IndexProjectFiles(ctx context.Context, path string) (int, error) {
+func (m *MockMemoryClient) IndexProjectFiles(ctx context.Context, path string, tag string) (int, error) {
 	m.indexProjectFilesCalled = true
 	
 	if m.returnError {

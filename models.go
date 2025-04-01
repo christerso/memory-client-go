@@ -25,6 +25,7 @@ type ProjectFile struct {
 	Language string    `json:"language"` // Programming language or file type
 	Vector   []float32 `json:"-"`        // Vector embedding
 	ModTime  int64     `json:"mod_time"` // Last modification time (Unix timestamp)
+	Tag      string    `json:"tag,omitempty"` // Optional tag for categorization
 }
 
 // MediaExtensions is a list of file extensions to exclude from project indexing

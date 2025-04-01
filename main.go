@@ -13,6 +13,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	
+	"github.com/user/memory-client-go/internal/client"
+	"github.com/user/memory-client-go/internal/config"
+	"github.com/user/memory-client-go/internal/dashboard"
+	"github.com/user/memory-client-go/internal/mcp"
+	"github.com/user/memory-client-go/internal/models"
 )
 
 const (
@@ -28,10 +34,15 @@ var (
 	collectionName string
 	embeddingSize  int
 	verbose        bool
-)
-
-var (
-	projectPath string
+	role           string
+	file           string
+	limit          int
+	projectPath    string
+	projectTag     string
+	clearPeriod    string
+	clearStartDate string
+	clearEndDate   string
+	dashboardPort  int
 )
 
 var rootCmd = &cobra.Command{
@@ -39,16 +50,47 @@ var rootCmd = &cobra.Command{
 	Short: "MCP Memory Client for persistent conversation storage",
 }
 
+var dashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Start the web dashboard for monitoring memory usage",
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx := context.Background()
+		memClient := initClient()
+		defer memClient.Close()
+
+		fmt.Printf("Starting memory dashboard on http://localhost:%d\n", dashboardPort)
+		fmt.Println("Press Ctrl+C to stop")
+
+		// Create and start the dashboard server
+		server := dashboard.NewDashboardServer(memClient, dashboardPort)
+		
+		// Handle graceful shutdown
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		
+		go func() {
+			<-c
+			fmt.Println("\nShutting down dashboard...")
+			os.Exit(0)
+		}()
+		
+		if err := server.Start(ctx); err != nil {
+			fmt.Printf("Dashboard server error: %v\n", err)
+			os.Exit(1)
+		}
+	},
+}
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start memory server daemon",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		fmt.Println("Starting memory server daemon...")
-		runBackgroundIndexer(ctx, client)
+		runBackgroundIndexer(ctx, memClient)
 		select {} // Block forever
 	},
 }
@@ -58,14 +100,14 @@ var mcpCmd = &cobra.Command{
 	Short: "Start as MCP server",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		if verbose {
 			fmt.Println("Starting MCP memory server...")
 		}
 
-		server := NewMCPServer(client)
+		server := mcp.NewMCPServer(memClient)
 		if err := server.Start(ctx); err != nil {
 			if verbose {
 				fmt.Printf("MCP server error: %v\n", err)
@@ -83,14 +125,11 @@ var addCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
-		msg := NewMessage(Role(args[0]), args[1])
-		if err := client.AddMessage(ctx, msg); err != nil {
-			fmt.Printf("Error adding message: %v\n", err)
-			os.Exit(1)
-		}
+		msg := models.NewMessage(models.Role(args[0]), args[1])
+		memClient.AddMessage(ctx, msg)
 		fmt.Println("Message added successfully")
 	},
 }
@@ -104,8 +143,8 @@ var indexProjectCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		// Use provided path or current directory
 		path := "."
@@ -118,8 +157,20 @@ var indexProjectCmd = &cobra.Command{
 			path = projectPath
 		}
 
-		fmt.Printf("Indexing project files in: %s\n", path)
-		count, err := client.IndexProjectFiles(ctx, path)
+		// Get absolute path
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			fmt.Printf("Error getting absolute path: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Indexing project files in: %s\n", absPath)
+		if projectTag != "" {
+			fmt.Printf("Using tag: %s\n", projectTag)
+		}
+		
+		// Index project files
+		count, err := memClient.IndexProjectFiles(ctx, absPath, projectTag)
 		if err != nil {
 			fmt.Printf("Error indexing project: %v\n", err)
 			os.Exit(1)
@@ -138,8 +189,8 @@ var updateProjectCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		// Use provided path or current directory
 		path := "."
@@ -151,9 +202,9 @@ var updateProjectCmd = &cobra.Command{
 		if projectPath != "" {
 			path = projectPath
 		}
-
+		
 		fmt.Printf("Updating project files in: %s\n", path)
-		newCount, updateCount, err := client.UpdateProjectFiles(ctx, path)
+		newCount, updateCount, err := memClient.UpdateProjectFiles(ctx, path)
 		if err != nil {
 			fmt.Printf("Error updating project: %v\n", err)
 			os.Exit(1)
@@ -165,15 +216,9 @@ var updateProjectCmd = &cobra.Command{
 
 var watchProjectCmd = &cobra.Command{
 	Use:   "watch-project [path]",
-	Short: "Watch a project directory for changes and update automatically",
+	Short: "Watch project files for changes and update index",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		client := initClient()
-		defer client.Close()
-
 		// Use provided path or current directory
 		path := "."
 		if len(args) > 0 {
@@ -194,15 +239,21 @@ var watchProjectCmd = &cobra.Command{
 
 		fmt.Printf("Watching project directory: %s\n", absPath)
 		fmt.Println("Press Ctrl+C to stop")
-
+		
 		// First, index the project
-		_, err = client.IndexProjectFiles(ctx, absPath)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		memClient := initClient()
+		
+		count, err := memClient.IndexProjectFiles(ctx, absPath, projectTag)
 		if err != nil {
 			fmt.Printf("Error indexing project: %v\n", err)
 			os.Exit(1)
 		}
-
-		// Set up a ticker to check for changes every 5 seconds
+		cancel()
+		
+		fmt.Printf("Initial indexing complete: %d files indexed\n", count)
+		
+		// Now watch for changes
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
@@ -214,7 +265,7 @@ var watchProjectCmd = &cobra.Command{
 		for {
 			select {
 			case <-ticker.C:
-				newCount, updateCount, err := client.UpdateProjectFiles(ctx, absPath)
+				newCount, updateCount, err := memClient.UpdateProjectFiles(ctx, absPath)
 				if err != nil {
 					fmt.Printf("Error updating project: %v\n", err)
 					continue
@@ -239,10 +290,10 @@ var searchCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
-		results, err := client.SearchMessages(ctx, args[0], 10)
+		results, err := memClient.SearchMessages(ctx, args[0], 10)
 		if err != nil {
 			fmt.Printf("Search failed: %v\n", err)
 			os.Exit(1)
@@ -263,10 +314,10 @@ var searchProjectCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
-		results, err := client.SearchProjectFiles(ctx, args[0], 10)
+		results, err := memClient.SearchProjectFiles(ctx, args[0], 10)
 		if err != nil {
 			fmt.Printf("Project search failed: %v\n", err)
 			os.Exit(1)
@@ -287,15 +338,15 @@ var historyCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		limit := 10
 		if len(args) > 0 {
 			fmt.Sscanf(args[0], "%d", &limit)
 		}
 
-		messages, err := client.GetConversationHistory(ctx, limit)
+		messages, err := memClient.GetConversationHistory(ctx, limit, nil)
 		if err != nil {
 			fmt.Printf("Error retrieving history: %v\n", err)
 			os.Exit(1)
@@ -346,8 +397,8 @@ var purgeCmd = &cobra.Command{
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		fmt.Println("WARNING: This will delete ALL data from Qdrant!")
 		fmt.Println("This action cannot be undone.")
@@ -362,7 +413,7 @@ var purgeCmd = &cobra.Command{
 		}
 
 		fmt.Println("Purging all data from Qdrant...")
-		err := client.PurgeQdrant(ctx)
+		err := memClient.PurgeQdrant(ctx)
 		if err != nil {
 			fmt.Printf("Error purging data: %v\n", err)
 			os.Exit(1)
@@ -386,8 +437,8 @@ Available periods:
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		client := initClient()
-		defer client.Close()
+		memClient := initClient()
+		defer memClient.Close()
 
 		period := args[0]
 		
@@ -397,13 +448,13 @@ Available periods:
 		switch period {
 		case "day":
 			fmt.Println("Clearing messages from the current day...")
-			count, err = client.DeleteMessagesForCurrentDay(ctx)
+			count, err = memClient.DeleteMessagesForCurrentDay(ctx)
 		case "week":
 			fmt.Println("Clearing messages from the current week...")
-			count, err = client.DeleteMessagesForCurrentWeek(ctx)
+			count, err = memClient.DeleteMessagesForCurrentWeek(ctx)
 		case "month":
 			fmt.Println("Clearing messages from the current month...")
-			count, err = client.DeleteMessagesForCurrentMonth(ctx)
+			count, err = memClient.DeleteMessagesForCurrentMonth(ctx)
 		case "range":
 			fromStr, _ := cmd.Flags().GetString("from")
 			toStr, _ := cmd.Flags().GetString("to")
@@ -431,7 +482,7 @@ Available periods:
 			to = time.Date(to.Year(), to.Month(), to.Day(), 23, 59, 59, 999999999, to.Location())
 			
 			fmt.Printf("Clearing messages from %s to %s...\n", from.Format("2006-01-02"), to.Format("2006-01-02"))
-			count, err = client.DeleteMessagesByTimeRange(ctx, from, to)
+			count, err = memClient.DeleteMessagesByTimeRange(ctx, from, to)
 		default:
 			fmt.Printf("Unknown period: %s\n", period)
 			fmt.Println("Available periods: day, week, month, range")
@@ -533,25 +584,34 @@ func min(a, b int) int {
 }
 
 func init() {
-	// Add commands
-	rootCmd.AddCommand(serveCmd, mcpCmd, addCmd, searchCmd, historyCmd, indexProjectCmd, 
-		searchProjectCmd, updateProjectCmd, watchProjectCmd, statusCmd, purgeCmd, clearCmd, versionCmd)
+	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(indexProjectCmd)
+	rootCmd.AddCommand(updateProjectCmd)
+	rootCmd.AddCommand(watchProjectCmd)
+	rootCmd.AddCommand(purgeCmd)
+	rootCmd.AddCommand(clearCmd)
+	rootCmd.AddCommand(dashboardCmd)
 
 	// Add flags
-	rootCmd.PersistentFlags().StringVar(&qdrantURL, "qdrant-url", "http://localhost:6333", "URL for Qdrant server")
-	rootCmd.PersistentFlags().StringVar(&collectionName, "collection", "memory", "Collection name in Qdrant")
-	rootCmd.PersistentFlags().IntVar(&embeddingSize, "embedding-size", 1536, "Size of embeddings")
-	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
-	rootCmd.PersistentFlags().StringVar(&projectPath, "project", "", "Project directory path")
-
+	addCmd.Flags().StringVarP(&role, "role", "r", "user", "Role (user, assistant, system, project)")
+	addCmd.Flags().StringVarP(&file, "file", "f", "", "File to add")
+	searchCmd.Flags().IntVarP(&limit, "limit", "l", 10, "Limit results")
+	
 	// Project path flag for index-project and update-project commands
 	indexProjectCmd.Flags().StringVarP(&projectPath, "path", "p", "", "Path to project directory")
+	indexProjectCmd.Flags().StringVarP(&projectTag, "tag", "t", "", "Tag to associate with indexed files")
 	updateProjectCmd.Flags().StringVarP(&projectPath, "path", "p", "", "Path to project directory")
 	watchProjectCmd.Flags().StringVarP(&projectPath, "path", "p", "", "Path to project directory")
+	watchProjectCmd.Flags().StringVarP(&projectTag, "tag", "t", "", "Tag to associate with indexed files")
 	
-	// Date range flags for clear command
-	clearCmd.Flags().String("from", "", "Start date for range period (format: YYYY-MM-DD)")
-	clearCmd.Flags().String("to", "", "End date for range period (format: YYYY-MM-DD)")
+	// Clear command flags
+	clearCmd.Flags().StringVarP(&clearPeriod, "period", "p", "", "Period to clear (day, week, month)")
+	clearCmd.Flags().StringVarP(&clearStartDate, "start-date", "s", "", "Start date (YYYY-MM-DD)")
+	clearCmd.Flags().StringVarP(&clearEndDate, "end-date", "e", "", "End date (YYYY-MM-DD)")
+	
+	// Dashboard command flags
+	dashboardCmd.Flags().IntVarP(&dashboardPort, "port", "p", 8081, "Port to run the dashboard server on")
 }
 
 func main() {
@@ -561,8 +621,8 @@ func main() {
 	}
 }
 
-func initClient() *MemoryClient {
-	cfg := LoadConfig()
+func initClient() *client.MemoryClient {
+	cfg := config.LoadConfig()
 
 	// Override with command line flags if provided
 	if qdrantURL != "" {
@@ -580,15 +640,15 @@ func initClient() *MemoryClient {
 			cfg.QdrantURL, cfg.CollectionName)
 	}
 
-	client, err := NewMemoryClient(cfg.QdrantURL, cfg.CollectionName, cfg.EmbeddingSize, verbose)
+	memClient, err := client.NewMemoryClient(cfg.QdrantURL, cfg.CollectionName, cfg.EmbeddingSize, verbose)
 	if err != nil {
 		fmt.Printf("Failed to initialize client: %v\n", err)
 		os.Exit(1)
 	}
-	return client
+	return memClient
 }
 
-func runBackgroundIndexer(ctx context.Context, client *MemoryClient) {
+func runBackgroundIndexer(ctx context.Context, memClient *client.MemoryClient) {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -596,7 +656,7 @@ func runBackgroundIndexer(ctx context.Context, client *MemoryClient) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := client.IndexMessages(ctx); err != nil {
+				if err := memClient.IndexMessages(ctx); err != nil {
 					fmt.Printf("Background indexing error: %v\n", err)
 				}
 			case <-ctx.Done():

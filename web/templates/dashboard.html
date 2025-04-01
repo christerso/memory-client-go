@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Client Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/dashboard.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0"></script>
+    <style>
+        .dashboard-row {
+            height: calc(100vh - 150px);
+            min-height: 400px;
+        }
+        
+        .chart-container, .log-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .chart-wrapper, .log-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #memoryChart {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #activity-log {
+            height: 100%;
+            overflow-y: auto;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light py-2">
+        <div class="container">
+            <a class="navbar-brand" href="#">Memory Dashboard</a>
+            <div class="ms-auto d-flex align-items-center">
+                <div class="form-check form-switch me-3">
+                    <input class="form-check-input" type="checkbox" id="dark-mode-toggle">
+                    <label class="form-check-label" for="dark-mode-toggle">Dark</label>
+                </div>
+                <span class="badge bg-secondary">v{{.ServerVersion}}</span>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container-fluid mt-2">
+        <div class="row g-2 dashboard-row">
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Memory Stats</span>
+                        <span class="badge bg-primary" id="uptime">{{.ServerUptime}}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-6 text-center">
+                                <div class="stats-value">{{.Stats.TotalVectors}}</div>
+                                <div class="stats-label">Total Vectors</div>
+                            </div>
+                            <div class="col-6 text-center">
+                                <div class="stats-value">{{.Stats.ProjectFileCount}}</div>
+                                <div class="stats-label">Project Files</div>
+                            </div>
+                            <div class="col-6 text-center">
+                                <div class="stats-value">{{.Stats.MessageCount.user}}</div>
+                                <div class="stats-label">User Messages</div>
+                            </div>
+                            <div class="col-6 text-center">
+                                <div class="stats-value">{{.Stats.MessageCount.assistant}}</div>
+                                <div class="stats-label">Assistant Messages</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">Memory Operations</div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-sm btn-danger" onclick="clearMemory('all')">Clear All Memories</button>
+                            <button class="btn btn-sm btn-warning" onclick="clearMemory('messages')">Clear Messages</button>
+                            <button class="btn btn-sm btn-warning" onclick="clearMemory('project_files')">Clear Project Files</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">Filter Project Files</div>
+                    <div class="card-body">
+                        <div class="compact-form mb-2">
+                            <input type="text" class="form-control" id="tag-filter" placeholder="Enter tag">
+                            <button class="btn btn-sm btn-primary" onclick="filterProjectFiles()">Filter</button>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearFilter()">Show All</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-header">Memory Usage Chart</div>
+                    <div class="card-body p-0 chart-container">
+                        <div class="chart-wrapper">
+                            <canvas id="memoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">Activity Log</div>
+                    <div class="card-body p-0 log-container">
+                        <div id="activity-log" class="log-wrapper"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-2">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Project Files</span>
+                        <span id="file-count" class="badge bg-info">0 files</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Path</th>
+                                        <th>Language</th>
+                                        <th>Tag</th>
+                                        <th>Modified</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="project-files">
+                                    <tr>
+                                        <td colspan="4" class="text-center">Loading...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Chart configuration
+            const ctx = document.getElementById('memoryChart').getContext('2d');
+            
+            // Create gradient for vectors
+            const vectorGradient = ctx.createLinearGradient(0, 0, 0, 400);
+            vectorGradient.addColorStop(0, 'rgba(54, 162, 235, 0.8)');
+            vectorGradient.addColorStop(1, 'rgba(54, 162, 235, 0.1)');
+            
+            // Create gradient for project files
+            const filesGradient = ctx.createLinearGradient(0, 0, 0, 400);
+            filesGradient.addColorStop(0, 'rgba(75, 192, 192, 0.8)');
+            filesGradient.addColorStop(1, 'rgba(75, 192, 192, 0.1)');
+            
+            window.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Total Vectors',
+                            data: [],
+                            borderColor: 'rgb(54, 162, 235)',
+                            backgroundColor: vectorGradient,
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            pointBackgroundColor: 'rgb(54, 162, 235)',
+                            tension: 0.4,
+                            fill: true
+                        },
+                        {
+                            label: 'Project Files',
+                            data: [],
+                            borderColor: 'rgb(75, 192, 192)',
+                            backgroundColor: filesGradient,
+                            borderWidth: 2,
+                            pointRadius: 3,
+                            pointBackgroundColor: 'rgb(75, 192, 192)',
+                            tension: 0.4,
+                            fill: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeOutQuart'
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute',
+                                displayFormats: {
+                                    minute: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            },
+                            grid: {
+                                color: 'rgba(200, 200, 200, 0.1)'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Count'
+                            },
+                            grid: {
+                                color: 'rgba(200, 200, 200, 0.1)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                boxWidth: 12,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            titleFont: {
+                                size: 14
+                            },
+                            bodyFont: {
+                                size: 13
+                            },
+                            padding: 10,
+                            cornerRadius: 4,
+                            displayColors: true
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        });
+    </script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

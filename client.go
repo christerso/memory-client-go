@@ -352,8 +352,8 @@ func (c *MemoryClient) SearchMessages(ctx context.Context, query string, limit i
 	return c.GetConversationHistory(ctx, limit)
 }
 
-// IndexProjectFiles indexes files in a project directory with progress reporting
-func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string) (int, error) {
+// IndexProjectFiles indexes files in a project directory
+func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string, tag string) (int, error) {
 	// Get absolute path
 	absPath, err := filepath.Abs(projectDir)
 	if err != nil {
@@ -370,6 +370,9 @@ func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string)
 	}
 
 	fmt.Printf("Indexing project directory: %s\n", absPath)
+	if tag != "" {
+		fmt.Printf("Using tag: %s\n", tag)
+	}
 
 	// Create project collection if it doesn't exist
 	projectCollection := c.collectionName + "_project"
@@ -468,6 +471,7 @@ func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string)
 				Language: language,
 				Vector:   make([]float32, c.embeddingSize),
 				ModTime:  info.ModTime().Unix(), // Store modification time
+				Tag:      tag,                   // Add the tag
 			}
 
 			// Generate random vector for now
@@ -499,33 +503,22 @@ func (c *MemoryClient) IndexProjectFiles(ctx context.Context, projectDir string)
 			
 			if addErr != nil {
 				// Log the error but continue with other files
-				fmt.Printf("Error indexing file %s: %v\n", relPath, addErr)
+				fmt.Printf("Error adding file %s: %v\n", relPath, addErr)
 				continue
 			}
-
-			count++
-
-			// Report progress
-			percent := (count * 100) / totalFiles
-			if percent > lastPercent {
-				fmt.Printf("Indexing progress: %d%% (%d/%d files)\n", percent, count, totalFiles)
-				lastPercent = percent
-			}
 			
-			// Check if the main context is done
-			select {
-			case <-ctx.Done():
-				return count, fmt.Errorf("indexing interrupted: %w", ctx.Err())
-			default:
-				// Continue processing
+			count++
+			
+			// Show progress
+			percent := count * 100 / totalFiles
+			if percent > lastPercent {
+				lastPercent = percent
+				fmt.Printf("Progress: %d%% (%d/%d files)\n", percent, count, totalFiles)
 			}
 		}
 	}
 
-	if count == 0 && totalFiles > 0 {
-		return 0, fmt.Errorf("failed to index any files")
-	}
-
+	fmt.Printf("Successfully indexed %d files\n", count)
 	return count, nil
 }
 
@@ -795,6 +788,7 @@ func (c *MemoryClient) addProjectFile(ctx context.Context, collectionName string
 					"Content":  file.Content,
 					"Language": file.Language,
 					"ModTime":  file.ModTime,
+					"Tag":      file.Tag,
 				},
 			},
 		},
@@ -932,12 +926,16 @@ func (c *MemoryClient) SearchProjectFiles(ctx context.Context, query string, lim
 			}
 		}
 
+		// Extract tag
+		tag, _ := payload["Tag"].(string)
+
 		files = append(files, &ProjectFile{
 			Path:     path,
 			Content:  content,
 			Language: language,
 			Vector:   vector,
 			ModTime:  modTime,
+			Tag:      tag,
 		})
 	}
 

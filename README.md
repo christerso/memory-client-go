@@ -36,6 +36,9 @@
     </td>
     <td width="50%">
       <h3>📁 Project Context</h3>
+      WARNING: This will delete ALL data from Qdrant!
+      This action cannot be undone.
+      Are you sure you want to continue? (y/N):
       <ul>
         <li>Indexes your project files</li>
         <li>Tracks file changes automatically</li>
@@ -163,6 +166,16 @@ memory-client index-project
 <td>
 
 ```bash
+memory-client index-project --tag "project-name"
+```
+
+</td>
+<td>Index files with a specific tag for better organization and retrieval</td>
+</tr>
+<tr>
+<td>
+
+```bash
 memory-client update-project
 ```
 
@@ -178,6 +191,16 @@ memory-client watch-project
 
 </td>
 <td>Continuously monitor for file changes</td>
+</tr>
+<tr>
+<td>
+
+```bash
+memory-client watch-project --tag "project-name"
+```
+
+</td>
+<td>Monitor files with a specific tag for better organization</td>
 </tr>
 <tr>
 <td>
@@ -202,7 +225,27 @@ When used with Cline/Roo, the memory client automatically indexes your project f
 
 The project memory excludes binary files, media files, and other non-text content to focus on code and documentation.
 
-## 🛠️ Usage
+### Project File Tagging
+
+The memory client supports tagging project files during indexing, which helps organize and categorize your codebase:
+
+- **Organize by Project**: Tag files with project names to separate different codebases
+- **Categorize by Purpose**: Use tags like "frontend", "backend", "tests", etc.
+- **Improve Retrieval**: Tags help the memory client find the most relevant files for your queries
+
+Example usage:
+
+```bash
+# Index a repository with a specific tag
+memory-client index-project --path /path/to/repo --tag "my-project"
+
+# Watch a repository with a specific tag
+memory-client watch-project --path /path/to/repo --tag "my-project"
+```
+
+Tags are stored in the vector database along with the file content, making it easier to retrieve related files later.
+
+## 🔍 Usage
 
 ### Command Line Interface
 

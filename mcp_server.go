@@ -26,7 +26,7 @@ type MemoryClientInterface interface {
 	TagMessages(ctx context.Context, query string, tags []string, limit int) (int, error)
 	SummarizeAndTagMessages(ctx context.Context, query string, summary string, tags []string, limit int) (int, error)
 	GetMessagesByTag(ctx context.Context, tag string, limit int) ([]*Message, error)
-	IndexProjectFiles(ctx context.Context, path string) (int, error)
+	IndexProjectFiles(ctx context.Context, path string, tag string) (int, error)
 	UpdateProjectFiles(ctx context.Context, path string) (int, int, error)
 	SearchProjectFiles(ctx context.Context, query string, limit int) ([]*ProjectFile, error)
 	DeleteProjectFile(ctx context.Context, path string) error
@@ -739,6 +739,7 @@ func (s *MCPServer) handleProjectFilesResource(ctx context.Context, requestID st
 func (s *MCPServer) handleIndexProject(ctx context.Context, requestID string, args json.RawMessage) (*MCPResponse, error) {
 	var params struct {
 		Path    string `json:"path"`
+		Tag     string `json:"tag"`
 		Verbose bool   `json:"verbose"`
 	}
 	err := json.Unmarshal(args, &params)
@@ -747,7 +748,7 @@ func (s *MCPServer) handleIndexProject(ctx context.Context, requestID string, ar
 	}
 
 	// Index project files
-	count, err := s.client.IndexProjectFiles(ctx, params.Path)
+	count, err := s.client.IndexProjectFiles(ctx, params.Path, params.Tag)
 	if err != nil {
 		return nil, err
 	}
@@ -1192,12 +1193,16 @@ func (s *MCPServer) sendServerInfo() error {
 							"type": "string",
 							"description": "Path to the project directory"
 						},
+						"tag": {
+							"type": "string",
+							"description": "Tag to apply to the indexed files"
+						},
 						"verbose": {
 							"type": "boolean",
 							"description": "Show detailed progress information"
 						}
 					},
-					"required": ["path"]
+					"required": ["path", "tag"]
 				}`),
 			},
 			{
