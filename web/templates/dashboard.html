@@ -60,8 +60,19 @@
         }
         
         .card {
+            height: auto;
+            margin-bottom: 15px;
+        }
+        
+        .sidebar-cards {
+            display: flex;
+            flex-direction: column;
             height: 100%;
-            margin-bottom: 10px;
+        }
+        
+        .sidebar-card {
+            margin-bottom: 15px;
+            flex-shrink: 0;
         }
         
         @media (max-width: 768px) {
@@ -88,52 +99,54 @@
     <div class="container-fluid mt-2 main-content">
         <div class="row g-2 dashboard-row">
             <div class="col-md-3">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>Memory Stats</span>
-                        <span class="badge bg-primary" id="uptime">{{.ServerUptime}}</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="row g-2">
-                            <div class="col-6 text-center">
-                                <div class="stats-value">{{.Stats.TotalVectors}}</div>
-                                <div class="stats-label">Total Vectors</div>
-                            </div>
-                            <div class="col-6 text-center">
-                                <div class="stats-value">{{.Stats.ProjectFileCount}}</div>
-                                <div class="stats-label">Project Files</div>
-                            </div>
-                            <div class="col-6 text-center">
-                                <div class="stats-value">{{.Stats.MessageCount.user}}</div>
-                                <div class="stats-label">User Messages</div>
-                            </div>
-                            <div class="col-6 text-center">
-                                <div class="stats-value">{{.Stats.MessageCount.assistant}}</div>
-                                <div class="stats-label">Assistant Messages</div>
+                <div class="sidebar-cards">
+                    <div class="card sidebar-card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span>Memory Stats</span>
+                            <span class="badge bg-primary" id="uptime">{{.ServerUptime}}</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-2">
+                                <div class="col-6 text-center">
+                                    <div class="stats-value">{{.Stats.TotalVectors}}</div>
+                                    <div class="stats-label">Total Vectors</div>
+                                </div>
+                                <div class="col-6 text-center">
+                                    <div class="stats-value">{{.Stats.ProjectFileCount}}</div>
+                                    <div class="stats-label">Project Files</div>
+                                </div>
+                                <div class="col-6 text-center">
+                                    <div class="stats-value">{{.Stats.MessageCount.user}}</div>
+                                    <div class="stats-label">User Messages</div>
+                                </div>
+                                <div class="col-6 text-center">
+                                    <div class="stats-value">{{.Stats.MessageCount.assistant}}</div>
+                                    <div class="stats-label">Assistant Messages</div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <div class="card">
-                    <div class="card-header">Memory Operations</div>
-                    <div class="card-body">
-                        <div class="d-grid gap-2">
-                            <button class="btn btn-sm btn-danger" onclick="clearMemory('all')">Clear All Memories</button>
-                            <button class="btn btn-sm btn-warning" onclick="clearMemory('messages')">Clear Messages</button>
-                            <button class="btn btn-sm btn-warning" onclick="clearMemory('project_files')">Clear Project Files</button>
+                    
+                    <div class="card sidebar-card">
+                        <div class="card-header">Memory Operations</div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-danger" onclick="clearMemory('all')">Clear All Memories</button>
+                                <button class="btn btn-sm btn-warning" onclick="clearMemory('messages')">Clear Messages</button>
+                                <button class="btn btn-sm btn-warning" onclick="clearMemory('project_files')">Clear Project Files</button>
+                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <div class="card">
-                    <div class="card-header">Filter Project Files</div>
-                    <div class="card-body">
-                        <div class="compact-form mb-2">
-                            <input type="text" class="form-control" id="tag-filter" placeholder="Enter tag">
-                            <button class="btn btn-sm btn-primary" id="filter-button">Filter</button>
+                    
+                    <div class="card sidebar-card">
+                        <div class="card-header">Filter Project Files</div>
+                        <div class="card-body">
+                            <div class="compact-form mb-2">
+                                <input type="text" class="form-control" id="tag-filter" placeholder="Enter tag">
+                                <button class="btn btn-sm btn-primary" id="filter-button">Filter</button>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearFilter()">Show All</button>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearFilter()">Show All</button>
                     </div>
                 </div>
             </div>

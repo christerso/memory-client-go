@@ -24,7 +24,7 @@ func main() {
 	}
 	
 	// Start dashboard server
-	port := 9093 // Using a less common port to avoid conflicts
+	port := 9094 // Using a less common port to avoid conflicts
 	fmt.Printf("Starting memory dashboard on http://localhost:%d\n", port)
 	fmt.Println("Press Ctrl+C to stop")
 	
