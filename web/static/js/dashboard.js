@@ -33,14 +33,14 @@ async function loadMemoryStats() {
         const chartData = stats.map(function(stat) {
             return {
                 x: new Date(stat.timestamp),
-                y: stat.total_vectors
+                y: stat.TotalVectors
             };
         });
         
         const filesData = stats.map(function(stat) {
             return {
                 x: new Date(stat.timestamp),
-                y: stat.project_file_count
+                y: stat.ProjectFileCount
             };
         });
         
@@ -156,13 +156,39 @@ function filterProjectFiles() {
     const tag = document.getElementById('tag-filter').value.trim();
     if (!tag) return;
     
-    loadProjectFiles(tag);
+    const projectFiles = document.getElementById('project-files');
+    const rows = projectFiles.querySelectorAll('tr');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const tagCell = row.querySelector('td:nth-child(3)');
+        if (!tagCell) return;
+        
+        const rowTag = tagCell.textContent.trim();
+        if (rowTag === tag) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('file-count').textContent = `${visibleCount} files`;
 }
 
-// Clear filter
+// Clear filter and show all project files
 function clearFilter() {
+    const projectFiles = document.getElementById('project-files');
+    const rows = projectFiles.querySelectorAll('tr');
+    let totalCount = 0;
+    
+    rows.forEach(row => {
+        row.style.display = '';
+        totalCount++;
+    });
+    
     document.getElementById('tag-filter').value = '';
-    loadProjectFiles();
+    document.getElementById('file-count').textContent = `${totalCount} files`;
 }
 
 // Clear memory
@@ -224,16 +250,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Get chart instance from the global scope
     chart = window.chart;
     
-    // Initial data load
+    // Load initial data
     loadMemoryStats();
     loadActivityLog();
     loadProjectFiles();
-    updateUptime();
     
     // Set up refresh intervals
-    setInterval(loadMemoryStats, 10000);
+    // Refresh memory stats every 5 seconds for a smoother chart
+    setInterval(loadMemoryStats, 5000);
+    
+    // Refresh activity log every 10 seconds
     setInterval(loadActivityLog, 10000);
-    setInterval(updateUptime, 60000);
+    
+    // Refresh project files every 30 seconds
+    setInterval(loadProjectFiles, 30000);
+    
+    // Update uptime every second
+    setInterval(updateUptime, 1000);
     
     // Set up event listeners
     document.getElementById('filter-button').addEventListener('click', filterProjectFiles);

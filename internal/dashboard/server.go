@@ -357,8 +357,8 @@ func (s *DashboardServer) collectStats(ctx context.Context) {
 	// Collect initial stats
 	s.collectAndStoreStats(ctx)
 
-	// Collect stats every minute
-	ticker := time.NewTicker(1 * time.Minute)
+	// Collect stats more frequently (every 15 seconds) for a smoother chart
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -394,9 +394,9 @@ func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 
 	s.statsMu.Lock()
 	s.memoryStats = append(s.memoryStats, point)
-	// Keep only the last 24 data points (2 hours of data at 5-minute intervals)
-	if len(s.memoryStats) > 24 {
-		s.memoryStats = s.memoryStats[len(s.memoryStats)-24:]
+	// Keep only the last 60 data points (15 minutes of data at 15-second intervals)
+	if len(s.memoryStats) > 60 {
+		s.memoryStats = s.memoryStats[len(s.memoryStats)-60:]
 	}
 	s.statsMu.Unlock()
 }

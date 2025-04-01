@@ -11,9 +11,22 @@
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.2.0"></script>
     <style>
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
         .dashboard-row {
-            height: calc(100vh - 150px);
+            flex: 1;
             min-height: 400px;
+            margin-bottom: 15px;
         }
         
         .chart-container, .log-container {
@@ -41,6 +54,21 @@
             overflow-y: auto;
             padding: 10px;
         }
+        
+        .project-files-row {
+            margin-top: 15px;
+        }
+        
+        .card {
+            height: 100%;
+            margin-bottom: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-row {
+                min-height: 300px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -57,7 +85,7 @@
         </div>
     </nav>
     
-    <div class="container-fluid mt-2">
+    <div class="container-fluid mt-2 main-content">
         <div class="row g-2 dashboard-row">
             <div class="col-md-3">
                 <div class="card">
@@ -103,7 +131,7 @@
                     <div class="card-body">
                         <div class="compact-form mb-2">
                             <input type="text" class="form-control" id="tag-filter" placeholder="Enter tag">
-                            <button class="btn btn-sm btn-primary" onclick="filterProjectFiles()">Filter</button>
+                            <button class="btn btn-sm btn-primary" id="filter-button">Filter</button>
                         </div>
                         <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearFilter()">Show All</button>
                     </div>
@@ -131,7 +159,7 @@
             </div>
         </div>
         
-        <div class="row mt-2">
+        <div class="row project-files-row">
             <div class="col-md-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -167,13 +195,14 @@
             // Chart configuration
             const ctx = document.getElementById('memoryChart').getContext('2d');
             
-            // Create gradient for vectors
-            const vectorGradient = ctx.createLinearGradient(0, 0, 0, 400);
+            // Create dynamic gradient for vectors based on actual canvas height
+            const chartHeight = ctx.canvas.height;
+            const vectorGradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
             vectorGradient.addColorStop(0, 'rgba(54, 162, 235, 0.8)');
             vectorGradient.addColorStop(1, 'rgba(54, 162, 235, 0.1)');
             
-            // Create gradient for project files
-            const filesGradient = ctx.createLinearGradient(0, 0, 0, 400);
+            // Create dynamic gradient for project files based on actual canvas height
+            const filesGradient = ctx.createLinearGradient(0, 0, 0, chartHeight);
             filesGradient.addColorStop(0, 'rgba(75, 192, 192, 0.8)');
             filesGradient.addColorStop(1, 'rgba(75, 192, 192, 0.1)');
             
@@ -190,7 +219,8 @@
                             pointRadius: 3,
                             pointBackgroundColor: 'rgb(54, 162, 235)',
                             tension: 0.4,
-                            fill: true
+                            fill: true,
+                            yAxisID: 'y-vectors'
                         },
                         {
                             label: 'Project Files',
@@ -201,7 +231,8 @@
                             pointRadius: 3,
                             pointBackgroundColor: 'rgb(75, 192, 192)',
                             tension: 0.4,
-                            fill: true
+                            fill: true,
+                            yAxisID: 'y-files'
                         }
                     ]
                 },
@@ -216,10 +247,12 @@
                         x: {
                             type: 'time',
                             time: {
-                                unit: 'minute',
+                                unit: 'second',
                                 displayFormats: {
+                                    second: 'HH:mm:ss',
                                     minute: 'HH:mm'
-                                }
+                                },
+                                tooltipFormat: 'HH:mm:ss'
                             },
                             title: {
                                 display: true,
@@ -229,14 +262,31 @@
                                 color: 'rgba(200, 200, 200, 0.1)'
                             }
                         },
-                        y: {
+                        'y-vectors': {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Count'
+                                text: 'Total Vectors'
                             },
                             grid: {
-                                color: 'rgba(200, 200, 200, 0.1)'
+                                color: 'rgba(54, 162, 235, 0.1)'
+                            }
+                        },
+                        'y-files': {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Project Files'
+                            },
+                            grid: {
+                                color: 'rgba(75, 192, 192, 0.1)',
+                                drawOnChartArea: false
                             }
                         }
                     },
