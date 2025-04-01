@@ -1,0 +1,139 @@
+package mcp
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/christerso/memory-client-go/internal/client"
+)
+
+// MCPServer represents the MCP server implementation
+type MCPServer struct {
+	client          client.MemoryClientInterface
+	startTime       time.Time
+	httpServer      *http.Server
+	requestsMu      sync.Mutex
+	requestsHandled int
+	operationsMu    sync.Mutex
+	recentOps       []OperationLog
+}
+
+// OperationLog represents a log entry for an operation
+type OperationLog struct {
+	Timestamp time.Time `json:"timestamp"`
+	Operation string    `json:"operation"`
+	Details   string    `json:"details"`
+	Success   bool      `json:"success"`
+}
+
+// NewMCPServer creates a new MCP server
+func NewMCPServer(client client.MemoryClientInterface) *MCPServer {
+	return &MCPServer{
+		client:    client,
+		startTime: time.Now(),
+		recentOps: make([]OperationLog, 0, 100),
+	}
+}
+
+// Start starts the MCP server
+func (s *MCPServer) Start(ctx context.Context) error {
+	log.Println("Starting MCP server")
+	s.logOperation("Server", "Starting MCP server", true)
+
+	// Start HTTP server for status page
+	go s.startHTTPServer(ctx)
+
+	// Send server info
+	err := s.sendServerInfo()
+	if err != nil {
+		return fmt.Errorf("failed to send server info: %w", err)
+	}
+
+	// Block until context is done
+	<-ctx.Done()
+	log.Println("MCP server stopped")
+	s.logOperation("Server", "MCP server stopped", true)
+	return nil
+}
+
+// logOperation logs an operation
+func (s *MCPServer) logOperation(operation, details string, success bool) {
+	s.operationsMu.Lock()
+	defer s.operationsMu.Unlock()
+
+	// Add operation to recent operations
+	op := OperationLog{
+		Timestamp: time.Now(),
+		Operation: operation,
+		Details:   details,
+		Success:   success,
+	}
+
+	// Add to beginning of slice
+	s.recentOps = append([]OperationLog{op}, s.recentOps...)
+
+	// Limit to 100 most recent operations
+	if len(s.recentOps) > 100 {
+		s.recentOps = s.recentOps[:100]
+	}
+}
+
+// getRecentOperations gets recent operations
+func (s *MCPServer) getRecentOperations() []OperationLog {
+	s.operationsMu.Lock()
+	defer s.operationsMu.Unlock()
+
+	// Return copy of recent operations
+	ops := make([]OperationLog, len(s.recentOps))
+	copy(ops, s.recentOps)
+	return ops
+}
+
+// sendServerInfo sends server information
+func (s *MCPServer) sendServerInfo() error {
+	serverInfo := MCPServerInfo{
+		ID:          "memory-client",
+		Name:        "Memory Client",
+		Description: "Memory client for persistent conversation storage",
+		Version:     "1.2.0",
+		Capabilities: []string{
+			"add_message",
+			"get_conversation_history",
+			"search_similar_messages",
+			"index_project",
+			"update_project",
+			"search_project_files",
+			"get_memory_stats",
+			"delete_message",
+			"delete_all_messages",
+			"delete_project_file",
+			"delete_all_project_files",
+			"tag_messages",
+			"summarize_and_tag_messages",
+			"get_messages_by_tag",
+		},
+		Resources: []string{
+			"conversation_history",
+			"project_files",
+		},
+	}
+
+	// TODO: Implement sending server info to client
+	// For now, just log it
+	log.Printf("Server info: %+v", serverInfo)
+	return nil
+}
+
+// MCPServerInfo represents server information
+type MCPServerInfo struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Version      string   `json:"version"`
+	Capabilities []string `json:"capabilities"`
+	Resources    []string `json:"resources"`
+}

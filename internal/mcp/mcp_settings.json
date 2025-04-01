@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "memory-server": {
+      "command": "C:/Users/christer/AppData/Roaming/memory-client/bin/memory-client.exe",
+      "args": ["mcp", "--verbose"],
+      "env": {
+        "QDRANT_URL": "http://localhost:6333",
+        "COLLECTION_NAME": "conversation_memory"
+      },
+      "disabled": false,
+      "alwaysAllow": ["*"]
+    }
+  }
+}

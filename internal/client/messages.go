@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 // AddMessage adds a message to memory

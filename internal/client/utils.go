@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 // generateID generates a unique ID

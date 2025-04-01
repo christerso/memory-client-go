@@ -9,34 +9,40 @@ import (
 	"net/http"
 	"runtime"
 	"time"
-
-	"github.com/user/memory-client-go/internal/models"
 )
 
-// startHTTPServer starts the HTTP server for status page
-func (s *MCPServer) startHTTPServer(ctx context.Context) {
+// startStatusHTTPServer starts the HTTP server for status page
+func (s *MCPServer) startStatusHTTPServer(ctx context.Context) {
 	mux := http.NewServeMux()
 
 	// API endpoints
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		s.requestsMu.Lock()
-		s.requestsHandled++
 		requestCount := s.requestsHandled
 		s.requestsMu.Unlock()
 
-		uptime := time.Since(s.startTime).Round(time.Second)
+		uptime := time.Since(s.startTime)
 
-		// Get memory stats
-		memStats := runtime.MemStats{}
-		runtime.ReadMemStats(&memStats)
+		runtimeMemStats := runtime.MemStats{}
+		runtime.ReadMemStats(&runtimeMemStats)
 
 		// Get memory client stats
 		clientStats, err := s.client.GetMemoryStats(r.Context())
+		var clientStatsMap map[string]interface{}
+		
 		if err != nil {
-			clientStats = &models.MemoryStats{
-				TotalVectors:     0,
-				MessageCount:     map[string]int{"total": 0},
-				ProjectFileCount: 0,
+			// Create default stats if there's an error
+			clientStatsMap = map[string]interface{}{
+				"total_vectors":      0,
+				"message_count":      map[string]int{"total": 0},
+				"project_file_count": 0,
+			}
+		} else {
+			// Convert MemoryStats to map[string]interface{}
+			clientStatsMap = map[string]interface{}{
+				"total_vectors":      clientStats.TotalVectors,
+				"message_count":      clientStats.MessageCount,
+				"project_file_count": clientStats.ProjectFileCount,
 			}
 		}
 
@@ -44,9 +50,9 @@ func (s *MCPServer) startHTTPServer(ctx context.Context) {
 			"status":          "running",
 			"uptime":          uptime.String(),
 			"requests":        requestCount,
-			"memory_usage_mb": memStats.Alloc / 1024 / 1024,
+			"memory_usage_mb": int64(runtimeMemStats.Alloc / 1024 / 1024),
 			"goroutines":      runtime.NumGoroutine(),
-			"client_stats":    clientStats,
+			"client_stats":    clientStatsMap,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -94,25 +100,32 @@ func (s *MCPServer) serveStatusPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get uptime
-	uptime := time.Since(s.startTime).Round(time.Second)
-
-	// Get request count
 	s.requestsMu.Lock()
 	requestCount := s.requestsHandled
 	s.requestsMu.Unlock()
 
-	// Get memory stats
-	memStats := runtime.MemStats{}
-	runtime.ReadMemStats(&memStats)
+	uptime := time.Since(s.startTime)
+
+	runtimeMemStats := runtime.MemStats{}
+	runtime.ReadMemStats(&runtimeMemStats)
 
 	// Get memory client stats
 	clientStats, err := s.client.GetMemoryStats(r.Context())
+	var clientStatsMap map[string]interface{}
+	
 	if err != nil {
-		clientStats = &models.MemoryStats{
-			TotalVectors:     0,
-			MessageCount:     map[string]int{"total": 0},
-			ProjectFileCount: 0,
+		// Create default stats if there's an error
+		clientStatsMap = map[string]interface{}{
+			"total_vectors":      0,
+			"message_count":      map[string]int{"total": 0},
+			"project_file_count": 0,
+		}
+	} else {
+		// Convert MemoryStats to map[string]interface{}
+		clientStatsMap = map[string]interface{}{
+			"total_vectors":      clientStats.TotalVectors,
+			"message_count":      clientStats.MessageCount,
+			"project_file_count": clientStats.ProjectFileCount,
 		}
 	}
 
@@ -126,9 +139,9 @@ func (s *MCPServer) serveStatusPage(w http.ResponseWriter, r *http.Request) {
 		"Uptime":          uptime.String(),
 		"StartTime":       s.startTime.Format(time.RFC1123),
 		"RequestsHandled": requestCount,
-		"MemoryUsageMB":   memStats.Alloc / 1024 / 1024,
+		"MemoryUsageMB":   int64(runtimeMemStats.Alloc / 1024 / 1024),
 		"Goroutines":      runtime.NumGoroutine(),
-		"ClientStats":     clientStats,
+		"ClientStats":     clientStatsMap,
 		"Operations":      operations,
 	}
 
@@ -262,15 +275,15 @@ const statusPageTemplate = `
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-title">Total Vectors</div>
-                <div class="stat-value">{{.ClientStats.TotalVectors}}</div>
+                <div class="stat-value">{{.ClientStats.total_vectors}}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-title">Messages</div>
-                <div class="stat-value">{{index .ClientStats.MessageCount "total"}}</div>
+                <div class="stat-value">{{index .ClientStats.message_count "total"}}</div>
             </div>
             <div class="stat-card">
                 <div class="stat-title">Project Files</div>
-                <div class="stat-value">{{.ClientStats.ProjectFileCount}}</div>
+                <div class="stat-value">{{.ClientStats.project_file_count}}</div>
             </div>
         </div>
         

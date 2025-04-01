@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 // MemoryClientInterface defines the interface for memory client operations

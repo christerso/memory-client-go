@@ -14,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 	
-	"github.com/user/memory-client-go/internal/client"
-	"github.com/user/memory-client-go/internal/config"
-	"github.com/user/memory-client-go/internal/dashboard"
-	"github.com/user/memory-client-go/internal/mcp"
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/client"
+	"github.com/christerso/memory-client-go/internal/config"
+	"github.com/christerso/memory-client-go/internal/dashboard"
+	"github.com/christerso/memory-client-go/internal/mcp"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 const (

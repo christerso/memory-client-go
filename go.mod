@@ -1,4 +1,4 @@
-module github.com/user/memory-client-go
+module github.com/christerso/memory-client-go
 
 go 1.23.7
 

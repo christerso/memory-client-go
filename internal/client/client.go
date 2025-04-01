@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 // MemoryClient represents a client for the Qdrant vector database

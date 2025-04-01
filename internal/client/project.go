@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/memory-client-go/internal/models"
+	"github.com/christerso/memory-client-go/internal/models"
 )
 
 // IndexProjectFiles indexes all files in a project directory
