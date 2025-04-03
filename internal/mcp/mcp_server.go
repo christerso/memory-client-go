@@ -10,11 +10,14 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
-	
+
 	"github.com/christerso/memory-client-go/internal/models"
+	"github.com/fasthttp/websocket"
+	"github.com/qdrant/go-client/qdrant"
 )
 
 // MemoryClientInterface defines the interface for memory client operations
@@ -37,17 +40,24 @@ type MemoryClientInterface interface {
 
 // MCPServer represents the MCP server implementation
 type MCPServer struct {
-	client         MemoryClientInterface
-	stdin          *os.File
-	stdout         *os.File
-	httpServer     *http.Server
-	apiServer      *http.Server
-	startTime      time.Time
-	requestsMu     sync.Mutex
+	client          MemoryClientInterface
+	qdrantClient    *QdrantWrapper
+	stdin           *os.File
+	stdout          *os.File
+	httpServer      *http.Server
+	apiServer       *http.Server
+	startTime       time.Time
+	requestsMu      sync.Mutex
 	requestsHandled int
-	recentOps      []OperationLog
-	recentOpsMu    sync.Mutex
-	maxRecentOps   int
+	recentOps       []OperationLog
+	recentOpsMu     sync.Mutex
+	maxRecentOps    int
+
+	// VS Code extension state
+	contexts   map[string]CodeContext // sessionID -> context
+	contextsMu sync.Mutex
+	threads    map[string]Thread // threadID -> thread
+	threadsMu  sync.Mutex
 }
 
 // OperationLog represents a log of a recent operation
@@ -59,9 +69,16 @@ type OperationLog struct {
 }
 
 // NewMCPServer creates a new MCP server
-func NewMCPServer(client MemoryClientInterface) *MCPServer {
+func NewMCPServer(client MemoryClientInterface, qdrantClient *qdrant.Client) *MCPServer {
+	// Wrap the qdrantClient with our QdrantWrapper
+	var qdrantWrapper *QdrantWrapper
+	if qdrantClient != nil {
+		qdrantWrapper = NewQdrantWrapper(qdrantClient)
+	}
+
 	return &MCPServer{
 		client:       client,
+		qdrantClient: qdrantWrapper,
 		stdin:        os.Stdin,
 		stdout:       os.Stdout,
 		startTime:    time.Now(),
@@ -85,7 +102,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 
 	// Start HTTP server for status checks and API access
 	go s.startHTTPServer(ctx)
-	
+
 	// Start API server for external clients
 	go s.startAPIServer(ctx)
 
@@ -133,7 +150,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 				log.Printf("Error sending response: %v", err)
 				s.logOperation("Response Sending", fmt.Sprintf("Failed to send response: %v", err), false)
 			}
-			
+
 			// Increment request counter
 			s.requestsMu.Lock()
 			s.requestsHandled++
@@ -146,7 +163,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 func (s *MCPServer) logOperation(operation, details string, success bool) {
 	s.recentOpsMu.Lock()
 	defer s.recentOpsMu.Unlock()
-	
+
 	// Add new operation log
 	s.recentOps = append(s.recentOps, OperationLog{
 		Timestamp: time.Now(),
@@ -154,7 +171,7 @@ func (s *MCPServer) logOperation(operation, details string, success bool) {
 		Details:   details,
 		Success:   success,
 	})
-	
+
 	// Trim if exceeding max size
 	if len(s.recentOps) > s.maxRecentOps {
 		s.recentOps = s.recentOps[len(s.recentOps)-s.maxRecentOps:]
@@ -165,59 +182,64 @@ func (s *MCPServer) logOperation(operation, details string, success bool) {
 func (s *MCPServer) getRecentOperations() []OperationLog {
 	s.recentOpsMu.Lock()
 	defer s.recentOpsMu.Unlock()
-	
+
 	// Return a copy to avoid race conditions
 	result := make([]OperationLog, len(s.recentOps))
 	copy(result, s.recentOps)
-	
+
 	// Reverse the order so newest are first
 	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
 		result[i], result[j] = result[j], result[i]
 	}
-	
+
 	return result
 }
 
 // startHTTPServer starts the HTTP server for status checks and API access
 func (s *MCPServer) startHTTPServer(ctx context.Context) {
 	mux := http.NewServeMux()
-	
+
+	// Add WebSocket endpoint for VS Code extension
+	mux.HandleFunc("/api/vscode/ws", func(w http.ResponseWriter, r *http.Request) {
+		s.handleVSCodeWebSocket(w, r)
+	})
+
 	// Add status endpoint for JSON API
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		s.requestsMu.Lock()
 		requestCount := s.requestsHandled
 		s.requestsMu.Unlock()
-		
+
 		uptime := time.Since(s.startTime).Round(time.Second)
-		
+
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
-		
+
 		status := map[string]interface{}{
-			"status":           "running",
-			"uptime":           uptime.String(),
-			"start_time":       s.startTime.Format(time.RFC3339),
-			"requests_handled": requestCount,
-			"memory_usage_mb":  float64(memStats.Alloc) / 1024 / 1024,
-			"goroutines":       runtime.NumGoroutine(),
+			"status":            "running",
+			"uptime":            uptime.String(),
+			"start_time":        s.startTime.Format(time.RFC3339),
+			"requests_handled":  requestCount,
+			"memory_usage_mb":   float64(memStats.Alloc) / 1024 / 1024,
+			"goroutines":        runtime.NumGoroutine(),
 			"recent_operations": s.getRecentOperations(),
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(status)
 	})
-	
+
 	// Add health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	
+
 	// Add web UI status page
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		s.serveStatusPageMCP(w, r)
 	})
-	
+
 	// Redirect root to status page
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -226,15 +248,15 @@ func (s *MCPServer) startHTTPServer(ctx context.Context) {
 		}
 		http.NotFound(w, r)
 	})
-	
+
 	s.httpServer = &http.Server{
 		Addr:    ":9580",
 		Handler: mux,
 	}
-	
+
 	log.Printf("Starting HTTP server on :9580")
 	s.logOperation("HTTP Server", "Started HTTP server on port 9580", true)
-	
+
 	// Start the server in a goroutine
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -242,13 +264,13 @@ func (s *MCPServer) startHTTPServer(ctx context.Context) {
 			s.logOperation("HTTP Server", fmt.Sprintf("HTTP server error: %v", err), false)
 		}
 	}()
-	
+
 	// Shutdown the server when context is done
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		log.Printf("Shutting down HTTP server")
 		s.logOperation("HTTP Server", "Shutting down HTTP server", true)
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
@@ -263,18 +285,18 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
 	s.requestsMu.Lock()
 	requestCount := s.requestsHandled
 	s.requestsMu.Unlock()
-	
+
 	uptime := time.Since(s.startTime).Round(time.Second)
-	
+
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	
+
 	// Get memory stats
 	memoryUsageMB := float64(memStats.Alloc) / 1024 / 1024
-	
+
 	// Get recent operations
 	recentOps := s.getRecentOperations()
-	
+
 	// Create data for template
 	data := map[string]interface{}{
 		"Status":          "Running",
@@ -286,7 +308,7 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
 		"RecentOps":       recentOps,
 		"RefreshTime":     time.Now().Format(time.RFC3339),
 	}
-	
+
 	// HTML template for the status page
 	tmpl := `
 <!DOCTYPE html>
@@ -296,24 +318,32 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
+        :root {
+            color-scheme: dark;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             line-height: 1.6;
-            color: #333;
+            color: #e0e0e0;
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: #121212 !important;
+            background-image: linear-gradient(rgba(255, 193, 7, 0.05) 1px, transparent 1px), 
+                             linear-gradient(90deg, rgba(255, 193, 7, 0.05) 1px, transparent 1px);
+            background-size: 20px 20px;
         }
         h1, h2 {
-            color: #2c3e50;
+            color: #4dabf7;
         }
         .card {
-            background: white;
+            background: #1e1e1e;
             border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
             padding: 20px;
             margin-bottom: 20px;
+            border: 1px solid #333;
         }
         .status-grid {
             display: grid;
@@ -322,20 +352,21 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
             margin-bottom: 20px;
         }
         .status-item {
-            background: white;
+            background: #2d2d2d;
             padding: 15px;
             border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            border: 1px solid #333;
         }
         .status-label {
             font-weight: bold;
-            color: #7f8c8d;
+            color: #adb5bd;
             font-size: 0.9em;
             margin-bottom: 5px;
         }
         .status-value {
             font-size: 1.4em;
-            color: #2c3e50;
+            color: #4dabf7;
         }
         table {
             width: 100%;
@@ -344,19 +375,20 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
         th, td {
             padding: 12px 15px;
             text-align: left;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid #333;
         }
         th {
-            background-color: #f8f9fa;
+            background-color: #2d2d2d;
+            color: #e0e0e0;
         }
         tr:hover {
-            background-color: #f1f1f1;
+            background-color: #2d2d2d;
         }
         .success {
-            color: #27ae60;
+            color: #28a745;
         }
         .failure {
-            color: #e74c3c;
+            color: #dc3545;
         }
         .refresh-bar {
             display: flex;
@@ -365,7 +397,7 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
             margin-bottom: 20px;
         }
         .refresh-button {
-            background-color: #3498db;
+            background-color: #4dabf7;
             color: white;
             border: none;
             padding: 8px 16px;
@@ -374,10 +406,10 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
             font-size: 14px;
         }
         .refresh-button:hover {
-            background-color: #2980b9;
+            background-color: #3c8dbc;
         }
         .last-refresh {
-            color: #7f8c8d;
+            color: #adb5bd;
             font-size: 0.9em;
         }
         @media (max-width: 768px) {
@@ -385,21 +417,43 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
                 grid-template-columns: 1fr;
             }
         }
+        
+        /* Debug indicator */
+        .debug-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: #dc3545;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 1000;
+            display: none;
+        }
     </style>
     <script>
-        // Auto-refresh the page every 5 seconds
         function setupAutoRefresh() {
+            // Auto refresh every 30 seconds
             setTimeout(function() {
                 window.location.reload();
-            }, 5000);
+            }, 30000);
         }
         
         window.onload = function() {
             setupAutoRefresh();
+            
+            // Debug logging
+            console.log('Dark mode active');
+            
+            // Force dark mode
+            document.documentElement.style.colorScheme = 'dark';
+            document.body.style.backgroundColor = '#121212';
+            document.body.style.color = '#e0e0e0';
         };
     </script>
 </head>
 <body>
+    <div class="debug-indicator">DARK MODE ACTIVE</div>
     <div class="card">
         <h1>MCP Server Status</h1>
         
@@ -468,14 +522,14 @@ func (s *MCPServer) serveStatusPageMCP(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>
 `
-	
+
 	// Parse and execute the template
 	t, err := template.New("status").Parse(tmpl)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error parsing template: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	err = t.Execute(w, data)
 	if err != nil {
@@ -491,9 +545,184 @@ func (s *MCPServer) handleRequest(ctx context.Context, request *MCPRequest) (*MC
 		return s.handleToolCall(ctx, request)
 	case "resource_access":
 		return s.handleResourceAccess(ctx, request)
+	case "vscode_extension":
+		return s.handleVSCodeRequest(ctx, request)
+	case "list_tools_request":
+		return s.handleListToolsRequest(ctx, request.ID)
+	case "list_resources_request":
+		return s.handleListResourcesRequest(ctx, request.ID)
 	default:
 		return nil, fmt.Errorf("unsupported request type: %s", request.Type)
 	}
+}
+
+// handleVSCodeWebSocket handles WebSocket connections from VS Code
+func (s *MCPServer) handleVSCodeWebSocket(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		var msg VSCodeMessage
+		err := conn.ReadJSON(&msg)
+		if err != nil {
+			log.Printf("WebSocket read error: %v", err)
+			break
+		}
+
+		response, err := s.processVSCodeMessage(r.Context(), msg)
+		if err != nil {
+			log.Printf("Error processing message: %v", err)
+			conn.WriteJSON(VSCodeErrorResponse{
+				Error: err.Error(),
+			})
+			continue
+		}
+
+		if err := conn.WriteJSON(response); err != nil {
+			log.Printf("WebSocket write error: %v", err)
+			break
+		}
+	}
+}
+
+// processVSCodeMessage handles messages from VS Code extension
+func (s *MCPServer) processVSCodeMessage(ctx context.Context, msg VSCodeMessage) (interface{}, error) {
+	switch msg.Type {
+	case "store_context":
+		return s.handleStoreContext(ctx, msg)
+	case "get_context":
+		return s.handleGetContext(ctx, msg)
+	case "create_thread":
+		return s.handleCreateThread(ctx, msg)
+	case "get_threads":
+		return s.handleGetThreads(ctx, msg)
+	default:
+		return nil, fmt.Errorf("unknown message type: %s", msg.Type)
+	}
+}
+
+// handleStoreContext stores code context from VS Code
+func (s *MCPServer) handleStoreContext(ctx context.Context, msg VSCodeMessage) (interface{}, error) {
+	if msg.Context == nil {
+		return nil, fmt.Errorf("missing context in store_context message")
+	}
+
+	s.contextsMu.Lock()
+	defer s.contextsMu.Unlock()
+
+	if s.contexts == nil {
+		s.contexts = make(map[string]CodeContext)
+	}
+	s.contexts[msg.Context.SessionID] = *msg.Context
+
+	return map[string]interface{}{
+		"status":    "ok",
+		"sessionId": msg.Context.SessionID,
+		"storedAt":  time.Now().Format(time.RFC3339),
+	}, nil
+}
+
+// handleGetContext retrieves stored code context
+func (s *MCPServer) handleGetContext(ctx context.Context, msg VSCodeMessage) (interface{}, error) {
+	if msg.Context == nil || msg.Context.SessionID == "" {
+		return nil, fmt.Errorf("missing sessionID in get_context message")
+	}
+
+	s.contextsMu.Lock()
+	defer s.contextsMu.Unlock()
+
+	context, exists := s.contexts[msg.Context.SessionID]
+	if !exists {
+		return nil, fmt.Errorf("context not found for sessionID: %s", msg.Context.SessionID)
+	}
+
+	return map[string]interface{}{
+		"status":  "ok",
+		"context": context,
+	}, nil
+}
+
+// handleCreateThread creates a new conversation thread
+func (s *MCPServer) handleCreateThread(ctx context.Context, msg VSCodeMessage) (interface{}, error) {
+	if msg.Context == nil {
+		return nil, fmt.Errorf("missing context in create_thread message")
+	}
+
+	threadID := fmt.Sprintf("thread_%d", time.Now().UnixNano())
+	newThread := Thread{
+		ID:        threadID,
+		Title:     fmt.Sprintf("Discussion about %s", msg.Context.File),
+		CreatedAt: time.Now(),
+		Context:   *msg.Context,
+	}
+
+	s.threadsMu.Lock()
+	defer s.threadsMu.Unlock()
+
+	if s.threads == nil {
+		s.threads = make(map[string]Thread)
+	}
+	s.threads[threadID] = newThread
+
+	return map[string]interface{}{
+		"status": "ok",
+		"thread": newThread,
+	}, nil
+}
+
+// handleGetThreads lists all conversation threads
+func (s *MCPServer) handleGetThreads(ctx context.Context, msg VSCodeMessage) (interface{}, error) {
+	s.threadsMu.Lock()
+	defer s.threadsMu.Unlock()
+
+	threads := make([]Thread, 0, len(s.threads))
+	for _, t := range s.threads {
+		threads = append(threads, t)
+	}
+
+	// Sort threads by creation time (newest first)
+	sort.Slice(threads, func(i, j int) bool {
+		return threads[i].CreatedAt.After(threads[j].CreatedAt)
+	})
+
+	return map[string]interface{}{
+		"status":  "ok",
+		"threads": threads,
+	}, nil
+}
+
+// handleVSCodeRequest handles MCP requests from VS Code extension
+func (s *MCPServer) handleVSCodeRequest(ctx context.Context, request *MCPRequest) (*MCPResponse, error) {
+	var vscodeReq VSCodeMessage
+	err := json.Unmarshal(request.Data, &vscodeReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal vscode request: %w", err)
+	}
+
+	result, err := s.processVSCodeMessage(ctx, vscodeReq)
+	if err != nil {
+		return nil, err
+	}
+
+	responseData, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return &MCPResponse{
+		ID:      request.ID,
+		Type:    "vscode_response",
+		Success: true,
+		Data:    responseData,
+	}, nil
 }
 
 // handleToolCall handles a tool call request
@@ -541,18 +770,34 @@ func (s *MCPServer) handleToolCall(ctx context.Context, request *MCPRequest) (*M
 // handleAddMessage handles the add_message tool call
 func (s *MCPServer) handleAddMessage(ctx context.Context, requestID string, args json.RawMessage) (*MCPResponse, error) {
 	var params struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string    `json:"role"`
+		Content   string    `json:"content"`
+		Embedding []float32 `json:"embedding"`
 	}
 	err := json.Unmarshal(args, &params)
 	if err != nil {
 		return nil, err
 	}
 
+	// Create message with embedding
 	message := models.NewMessage(models.Role(params.Role), params.Content)
+	message.Embedding = params.Embedding
+
+	// Store in both memory client and Qdrant
 	err = s.client.AddMessage(ctx, message)
 	if err != nil {
 		return nil, err
+	}
+
+	// Upsert to Qdrant vector storage if qdrantClient is available
+	if s.qdrantClient != nil {
+		err = s.qdrantClient.UpsertVector(ctx, message.ID, params.Embedding, map[string]interface{}{
+			"role":    params.Role,
+			"content": params.Content,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to upsert to Qdrant: %w", err)
+		}
 	}
 
 	return &MCPResponse{
@@ -902,6 +1147,10 @@ func (s *MCPServer) handleDeleteMessage(ctx context.Context, requestID string, a
 		return nil, fmt.Errorf("failed to parse arguments: %w", err)
 	}
 
+	if params.ID == "" {
+		return nil, fmt.Errorf("missing required parameter 'id'")
+	}
+
 	// Delete message
 	err = s.client.DeleteMessage(ctx, params.ID)
 	if err != nil {
@@ -1053,23 +1302,23 @@ func (s *MCPServer) handleSummarizeAndTagMessages(ctx context.Context, requestID
 	if params.Limit <= 0 {
 		params.Limit = 10
 	}
-	
+
 	// First, search for messages matching the query
 	messages, err := s.client.SearchMessages(ctx, params.Query, params.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search messages: %w", err)
 	}
-	
+
 	// Extract message IDs
 	var messageIDs []string
 	for _, msg := range messages {
 		messageIDs = append(messageIDs, msg.ID)
 	}
-	
+
 	if len(messageIDs) == 0 {
 		return nil, fmt.Errorf("no messages found matching the query")
 	}
-	
+
 	// Tag each message with all the provided tags
 	var taggedCount int
 	for _, tag := range params.Tags {
@@ -1083,8 +1332,8 @@ func (s *MCPServer) handleSummarizeAndTagMessages(ctx context.Context, requestID
 	// Prepare response data
 	responseData, err := json.Marshal(map[string]interface{}{
 		"summarized_and_tagged_count": taggedCount,
-		"summary":                    params.Summary,
-		"tags":                       params.Tags,
+		"summary":                     params.Summary,
+		"tags":                        params.Tags,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal response data: %w", err)
@@ -1109,6 +1358,10 @@ func (s *MCPServer) handleGetMessagesByTag(ctx context.Context, requestID string
 	err := json.Unmarshal(args, &params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse arguments: %w", err)
+	}
+
+	if params.Tag == "" {
+		return nil, fmt.Errorf("missing required parameter 'tag'")
 	}
 
 	// Set default limit if not provided
@@ -1421,6 +1674,32 @@ func (s *MCPServer) sendServerInfo() error {
 	return json.NewEncoder(s.stdout).Encode(serverInfo)
 }
 
+// VS Code extension protocol types
+type VSCodeMessage struct {
+	Type    string          `json:"type"`
+	Data    json.RawMessage `json:"data"`
+	Context *CodeContext    `json:"context,omitempty"`
+}
+
+type CodeContext struct {
+	File       string   `json:"file"`
+	Lines      []int    `json:"lines"`
+	Symbols    []string `json:"symbols"`
+	LanguageID string   `json:"languageId"`
+	SessionID  string   `json:"sessionId"`
+}
+
+type Thread struct {
+	ID        string      `json:"id"`
+	Title     string      `json:"title"`
+	CreatedAt time.Time   `json:"createdAt"`
+	Context   CodeContext `json:"context"`
+}
+
+type VSCodeErrorResponse struct {
+	Error string `json:"error"`
+}
+
 // MCP protocol types
 type MCPServerInfo struct {
 	Name        string        `json:"name"`
@@ -1463,4 +1742,137 @@ type MCPResponse struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data,omitempty"`
 	Error   string          `json:"error,omitempty"`
+}
+
+// handleListToolsRequest handles a request to list available tools
+func (s *MCPServer) handleListToolsRequest(ctx context.Context, requestID string) (*MCPResponse, error) {
+	// Log the operation
+	s.logOperation("List Tools Request", "Handling request to list available tools", true)
+
+	// Get the tools from the server info
+	serverInfo := MCPServerInfo{
+		Name:        "memory-server",
+		Version:     "1.0.0",
+		Description: "Memory server for conversation history",
+		Tools: []MCPTool{
+			{
+				Name:        "add_message",
+				Description: "Add a message to the conversation history",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"role": {
+							"type": "string",
+							"enum": ["user", "assistant", "system"],
+							"description": "Role of the message sender"
+						},
+						"content": {
+							"type": "string",
+							"description": "Content of the message"
+						}
+					},
+					"required": ["role", "content"]
+				}`),
+			},
+			{
+				Name:        "get_conversation_history",
+				Description: "Retrieve the conversation history",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of messages to retrieve"
+						}
+					}
+				}`),
+			},
+			{
+				Name:        "search_similar_messages",
+				Description: "Search for messages similar to a query",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Query text to search for similar messages"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of similar messages to retrieve"
+						}
+					},
+					"required": ["query"]
+				}`),
+			},
+			{
+				Name:        "get_milestones",
+				Description: "Retrieve milestones from the conversation",
+				InputSchema: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"type": {
+							"type": "string",
+							"enum": ["personal_info", "preference", "action", "decision", "goal"],
+							"description": "Type of milestones to retrieve (optional)"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Maximum number of milestones to retrieve"
+						}
+					}
+				}`),
+			},
+		},
+	}
+
+	// Marshal the tools to JSON
+	responseData, err := json.Marshal(serverInfo.Tools)
+	if err != nil {
+		s.logOperation("List Tools Request", fmt.Sprintf("Failed to marshal tools: %v", err), false)
+		return nil, err
+	}
+
+	// Return the response
+	return &MCPResponse{
+		ID:      requestID,
+		Type:    "tools_list",
+		Success: true,
+		Data:    responseData,
+	}, nil
+}
+
+// handleListResourcesRequest handles a request to list available resources
+func (s *MCPServer) handleListResourcesRequest(ctx context.Context, requestID string) (*MCPResponse, error) {
+	// Log the operation
+	s.logOperation("List Resources Request", "Handling request to list available resources", true)
+
+	// Get the resources from the server info
+	resources := []MCPResource{
+		{
+			URI:         "memory:///conversation_history",
+			Name:        "Conversation History",
+			Description: "Complete history of the conversation",
+		},
+		{
+			URI:         "memory:///milestones",
+			Name:        "Milestones",
+			Description: "Detected milestones from the conversation",
+		},
+	}
+
+	// Marshal the resources to JSON
+	responseData, err := json.Marshal(resources)
+	if err != nil {
+		s.logOperation("List Resources Request", fmt.Sprintf("Failed to marshal resources: %v", err), false)
+		return nil, err
+	}
+
+	// Return the response
+	return &MCPResponse{
+		ID:      requestID,
+		Type:    "resources_list",
+		Success: true,
+		Data:    responseData,
+	}, nil
 }
