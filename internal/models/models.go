@@ -19,7 +19,7 @@ type Message struct {
 	ID        string            `json:"id"`
 	Role      Role              `json:"role"`
 	Content   string            `json:"content"`
-	Vector    []float32         `json:"-"`
+	Embedding []float32         `json:"embedding"`
 	Tags      []string          `json:"tags,omitempty"`
 	Summary   string            `json:"summary,omitempty"`
 	Timestamp time.Time         `json:"timestamp"`
@@ -29,14 +29,14 @@ type Message struct {
 
 // ProjectFile represents a file in a project
 type ProjectFile struct {
-	ID        string    `json:"id"`        // Unique identifier
-	Path      string    `json:"path"`      // Relative path to the file
-	Content   string    `json:"content"`   // File content
-	Language  string    `json:"language"`  // Programming language or file type
-	Vector    []float32 `json:"-"`         // Vector embedding
-	ModTime   int64     `json:"mod_time"`  // Last modification time (Unix timestamp)
-	Tag       string    `json:"tag,omitempty"` // Optional tag for categorization
-	Timestamp time.Time `json:"timestamp"` // Time when the file was indexed
+	ID        string    `json:"id"`              // Unique identifier
+	Path      string    `json:"path"`            // Relative path to the file
+	Content   string    `json:"content"`         // File content
+	Language  string    `json:"language"`        // Programming language or file type
+	Vector    []float32 `json:"-"`               // Vector embedding
+	ModTime   int64     `json:"mod_time"`        // Last modification time (Unix timestamp)
+	Tag       string    `json:"tag,omitempty"`   // Optional tag for categorization
+	Timestamp time.Time `json:"timestamp"`       // Time when the file was indexed
 	Score     float64   `json:"score,omitempty"` // For search results
 }
 
@@ -56,9 +56,9 @@ type TimeRange struct {
 
 // MemoryStats represents memory usage statistics
 type MemoryStats struct {
-	TotalVectors    int            `json:"total_vectors"`
-	MessageCount    map[string]int `json:"message_count"`
-	ProjectFileCount int           `json:"project_file_count"`
+	TotalVectors     int            `json:"total_vectors"`
+	MessageCount     map[string]int `json:"message_count"`
+	ProjectFileCount int            `json:"project_file_count"`
 }
 
 // MediaExtensions is a list of file extensions to exclude from project indexing
@@ -145,8 +145,23 @@ func NewMessage(role Role, content string) *Message {
 	}
 }
 
-// generateUUID generates a unique ID
+// generateUUID generates a unique ID in UUID v4 format
 func generateUUID() string {
-	return time.Now().Format("20060102150405") + "-" + 
-		fmt.Sprintf("%06d", time.Now().Nanosecond()/1000)
+	// Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+	// Where x is any hexadecimal digit and y is one of 8, 9, A, or B
+
+	// Generate 16 random bytes
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = byte(time.Now().UnixNano() >> uint(i*8) & 0xff)
+	}
+
+	// Set version to 4 (random UUID)
+	b[6] = (b[6] & 0x0f) | 0x40
+
+	// Set variant to RFC4122
+	b[8] = (b[8] & 0x3f) | 0x80
+
+	// Format as UUID string
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }

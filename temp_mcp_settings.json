@@ -1,0 +1,5 @@
+{
+    "executable": "C:/Users/christer/Desktop/memory-client-go/memory-client.exe",
+    "arguments": ["mcp"],
+    "workingDir": "C:/Users/christer/Desktop/memory-client-go"
+}

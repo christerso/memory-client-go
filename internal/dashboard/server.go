@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,24 +20,25 @@ import (
 
 // DashboardServer represents the dashboard server
 type DashboardServer struct {
-	client          client.MemoryClientInterface
-	httpServer      *http.Server
-	startTime       time.Time
-	requestsMu      sync.Mutex
-	requestsHandled int
-	memoryStats     []MemoryStatsPoint
-	statsMu         sync.Mutex
-	activityLog     []LogEntry
+	client           client.MemoryClientInterface
+	httpServer       *http.Server
+	startTime        time.Time
+	requestsMu       sync.Mutex
+	requestsHandled  int
+	memoryStats      []MemoryStatsPoint
+	statsMu          sync.Mutex
+	activityLog      []LogEntry
 	requestCountFile string
-	port            int
+	port             int
+	webDir           string
 }
 
 // MemoryStatsPoint represents a point in time memory statistics
 type MemoryStatsPoint struct {
-	Timestamp       time.Time      `json:"timestamp"`
-	TotalVectors    int            `json:"total_vectors"`
-	MessageCount    map[string]int `json:"message_count"`
-	ProjectFileCount int           `json:"project_file_count"`
+	Timestamp        time.Time      `json:"timestamp"`
+	TotalVectors     int            `json:"total_vectors"`
+	MessageCount     map[string]int `json:"message_count"`
+	ProjectFileCount int            `json:"project_file_count"`
 }
 
 // LogEntry represents a log entry
@@ -54,18 +57,18 @@ type ServerStatus struct {
 // NewDashboardServer creates a new dashboard server
 func NewDashboardServer(client client.MemoryClientInterface, port int) *DashboardServer {
 	server := &DashboardServer{
-		client:          client,
-		startTime:       time.Now(),
+		client:           client,
+		startTime:        time.Now(),
 		requestCountFile: "web/data/request_count.txt",
-		port:            port,
+		port:             port,
 	}
-	
+
 	// Add some sample data for testing
 	if client == nil {
 		// Generate sample memory stats for testing
 		server.memoryStats = generateSampleMemoryStats()
 	}
-	
+
 	return server
 }
 
@@ -73,16 +76,16 @@ func NewDashboardServer(client client.MemoryClientInterface, port int) *Dashboar
 func generateSampleMemoryStats() []MemoryStatsPoint {
 	stats := make([]MemoryStatsPoint, 0, 60)
 	now := time.Now()
-	
+
 	// Generate data points for the last hour
 	for i := 59; i >= 0; i-- {
 		timestamp := now.Add(time.Duration(-i) * time.Minute)
 		totalVectors := 1000 + i*50 + rand.Intn(100)
 		projectFiles := 50 + i*2 + rand.Intn(10)
-		
+
 		stats = append(stats, MemoryStatsPoint{
-			Timestamp:       timestamp,
-			TotalVectors:    totalVectors,
+			Timestamp:        timestamp,
+			TotalVectors:     totalVectors,
 			ProjectFileCount: projectFiles,
 			MessageCount: map[string]int{
 				"user":      100 + i*2 + rand.Intn(10),
@@ -91,7 +94,7 @@ func generateSampleMemoryStats() []MemoryStatsPoint {
 			},
 		})
 	}
-	
+
 	return stats
 }
 
@@ -101,11 +104,11 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 	if s.memoryStats == nil {
 		s.memoryStats = make([]MemoryStatsPoint, 0)
 	}
-	
+
 	if s.activityLog == nil {
 		s.activityLog = make([]LogEntry, 0)
 	}
-	
+
 	// Ensure web directories exist
 	if err := s.ensureWebDirs(); err != nil {
 		return fmt.Errorf("failed to ensure web directories: %w", err)
@@ -192,7 +195,7 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 		status := ServerStatus{
 			RequestsHandled: requestCount,
 			Uptime:          time.Since(s.startTime).Round(time.Second).String(),
-			Version:         "1.2.0",
+			Version:         "1.3.0",
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -224,16 +227,16 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		
+
 		err := s.client.ClearAllMemories(ctx)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		message := "Cleared all memories"
 		s.addLogEntry(ctx, message)
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": message})
 	})
@@ -243,16 +246,16 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		
+
 		err := s.client.ClearMessages(ctx)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		message := "Cleared all messages"
 		s.addLogEntry(ctx, message)
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": message})
 	})
@@ -262,11 +265,11 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		
+
 		tag := r.URL.Query().Get("tag")
 		var err error
 		var message string
-		
+
 		if tag != "" {
 			err = s.client.DeleteProjectFilesByTag(ctx, tag)
 			message = fmt.Sprintf("Cleared project files with tag: %s", tag)
@@ -274,14 +277,14 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 			err = s.client.ClearProjectFiles(ctx)
 			message = "Cleared all project files"
 		}
-		
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		s.addLogEntry(ctx, message)
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": message})
 	})
@@ -294,10 +297,10 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/api/memory/files/filter", func(w http.ResponseWriter, r *http.Request) {
 		tag := r.URL.Query().Get("tag")
-		
+
 		var files []models.ProjectFile
 		var err error
-		
+
 		if tag != "" {
 			files, err = s.client.ListProjectFilesByTag(ctx, tag, 100)
 			if err == nil {
@@ -309,7 +312,7 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 				s.addLogEntry(ctx, "Listed all project files")
 			}
 		}
-		
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -321,8 +324,10 @@ func (s *DashboardServer) Start(ctx context.Context) error {
 
 	mux.HandleFunc("/api/project-files", s.handleProjectFiles)
 
+	mux.HandleFunc("/api/conversation-history", s.handleAPIConversationHistory)
+
 	// Static files
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(s.webDir, "static")))))
 
 	// Dashboard route
 	mux.HandleFunc("/", s.handleDashboard)
@@ -347,39 +352,39 @@ func (s *DashboardServer) handleClearMemory(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Parse request
 	type ClearRequest struct {
 		Type string `json:"type"`
 	}
-	
+
 	var req ClearRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	
+
 	ctx := r.Context()
-	
+
 	// If we're in test mode (no client), just log the action
 	if s.client == nil {
 		// Add log entry for the clear operation
 		s.addLogEntry(ctx, fmt.Sprintf("Cleared %s (TEST MODE)", req.Type))
-		
+
 		// In test mode, update our sample data to simulate clearing
 		s.statsMu.Lock()
 		defer s.statsMu.Unlock()
-		
+
 		// Simulate clearing by reducing counts
 		if len(s.memoryStats) > 0 {
 			lastStat := s.memoryStats[len(s.memoryStats)-1]
-			
+
 			// Create a new data point with some random changes
 			newStat := MemoryStatsPoint{
-				Timestamp: time.Now(),
+				Timestamp:    time.Now(),
 				MessageCount: make(map[string]int),
 			}
-			
+
 			// Simulate different types of clearing
 			switch req.Type {
 			case "all":
@@ -396,42 +401,42 @@ func (s *DashboardServer) handleClearMemory(w http.ResponseWriter, r *http.Reque
 				newStat.ProjectFileCount = 0
 				newStat.MessageCount = lastStat.MessageCount
 			}
-			
+
 			s.memoryStats = append(s.memoryStats, newStat)
-			
+
 			// Keep only the last 60 data points
 			if len(s.memoryStats) > 60 {
 				s.memoryStats = s.memoryStats[len(s.memoryStats)-60:]
 			}
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	
+
 	// If we have a real client, perform the actual clear operation
 	if s.client != nil {
 		// Actual implementation would go here
 	}
-	
+
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *DashboardServer) handleProjectFiles(w http.ResponseWriter, r *http.Request) {
 	// Get tag filter from query params
 	tag := r.URL.Query().Get("tag")
-	
+
 	// If we're in test mode (no client), return sample project files
 	if s.client == nil {
 		// Generate sample project files
 		files := generateSampleProjectFiles(tag)
-		
+
 		// Return project files
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(files)
 		return
 	}
-	
+
 	// If we have a real client, get actual project files
 	if s.client != nil {
 		// Actual implementation would go here
@@ -497,7 +502,7 @@ func generateSampleProjectFiles(tagFilter string) []map[string]interface{} {
 			"tag":      "docs",
 		},
 	}
-	
+
 	// Filter by tag if provided
 	if tagFilter != "" {
 		filtered := make([]map[string]interface{}, 0)
@@ -508,20 +513,107 @@ func generateSampleProjectFiles(tagFilter string) []map[string]interface{} {
 		}
 		return filtered
 	}
-	
+
 	return files
 }
 
-// ensureWebDirs ensures that web directories exist
+func (s *DashboardServer) getMemoryStats() (MemoryStatsPoint, error) {
+	// If we're in test mode (no client), return sample data
+	if s.client == nil {
+		// Return sample data
+		return MemoryStatsPoint{
+			Timestamp:        time.Now(),
+			TotalVectors:     rand.Intn(1000) + 500,
+			ProjectFileCount: rand.Intn(50) + 10,
+			MessageCount: map[string]int{
+				"user":      rand.Intn(100) + 50,
+				"assistant": rand.Intn(100) + 50,
+				"system":    rand.Intn(10) + 5,
+			},
+		}, nil
+	}
+
+	// Get memory stats from client
+	stats := MemoryStatsPoint{
+		Timestamp:    time.Now(),
+		MessageCount: make(map[string]int),
+	}
+
+	// Use the client to get stats
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get conversation history to count messages by role
+	messages, err := s.client.GetConversationHistory(ctx, 1000, nil)
+	if err != nil {
+		log.Printf("Error getting conversation history: %v", err)
+	} else {
+		// Count messages by role
+		for _, msg := range messages {
+			role := string(msg.Role)
+			stats.MessageCount[role]++
+			stats.TotalVectors++
+		}
+
+		log.Printf("Found %d messages in conversation history", len(messages))
+	}
+
+	// Get project files to count them
+	projectFiles, err := s.client.ListProjectFiles(ctx, 1000)
+	if err != nil {
+		log.Printf("Error getting project files: %v", err)
+	} else {
+		stats.ProjectFileCount = len(projectFiles)
+		log.Printf("Found %d project files", len(projectFiles))
+	}
+
+	// If we have no data yet, add some placeholder data
+	if stats.TotalVectors == 0 && len(stats.MessageCount) == 0 {
+		// Placeholder data for empty database
+		stats.MessageCount["user"] = 0
+		stats.MessageCount["assistant"] = 0
+		stats.TotalVectors = 0
+	}
+
+	return stats, nil
+}
+
 func (s *DashboardServer) ensureWebDirs() error {
-	// Create static directories
+	// Check for web directories in multiple locations
+	possiblePaths := []string{
+		"web",       // Current directory
+		"../web",    // One level up
+		"../../web", // Two levels up
+	}
+
+	// Get executable directory and add it to possible paths
+	execPath, err := os.Executable()
+	if err == nil {
+		execDir := filepath.Dir(execPath)
+		possiblePaths = append([]string{
+			filepath.Join(execDir, "web"),
+			filepath.Join(execDir, "..", "web"),
+		}, possiblePaths...)
+	}
+
+	// Try each path
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("Found web directory at: %s", path)
+			// Set the web directory in the server
+			s.webDir = path
+			return nil
+		}
+	}
+
+	// If we get here, we couldn't find the web directory
+	// Create the directories as a fallback
+	log.Printf("Web directory not found, creating in current directory")
 	dirs := []string{
 		"web/static",
 		"web/static/css",
 		"web/static/js",
-		"web/static/img",
 		"web/templates",
-		"web/data",
 	}
 
 	for _, dir := range dirs {
@@ -530,18 +622,18 @@ func (s *DashboardServer) ensureWebDirs() error {
 		}
 	}
 
+	s.webDir = "web"
 	return nil
 }
 
-// collectStats collects memory stats periodically
 func (s *DashboardServer) collectStats(ctx context.Context) {
 	// Collect initial stats
 	s.collectAndStoreStats(ctx)
-	
+
 	// Collect stats every 15 seconds
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -552,12 +644,11 @@ func (s *DashboardServer) collectStats(ctx context.Context) {
 	}
 }
 
-// collectAndStoreStats collects memory stats and stores them
 func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 	// Lock the stats mutex
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
-	
+
 	// If we're in test mode (no client), generate sample data
 	if s.client == nil {
 		// Generate sample data
@@ -567,15 +658,15 @@ func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 		} else {
 			// Update the last data point with some random changes
 			lastStat := s.memoryStats[len(s.memoryStats)-1]
-			
+
 			// Create a new data point with some random changes
 			newStat := MemoryStatsPoint{
-				Timestamp:       time.Now(),
-				TotalVectors:    lastStat.TotalVectors + rand.Intn(5),
+				Timestamp:        time.Now(),
+				TotalVectors:     lastStat.TotalVectors + rand.Intn(5),
 				ProjectFileCount: lastStat.ProjectFileCount,
-				MessageCount:    make(map[string]int),
+				MessageCount:     make(map[string]int),
 			}
-			
+
 			// Copy and slightly modify message counts
 			for role, count := range lastStat.MessageCount {
 				// Randomly increase some message counts
@@ -585,28 +676,28 @@ func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 					newStat.MessageCount[role] = count
 				}
 			}
-			
+
 			// Ensure we have user and assistant roles
 			if _, ok := newStat.MessageCount["user"]; !ok {
 				newStat.MessageCount["user"] = rand.Intn(10)
 			}
-			
+
 			if _, ok := newStat.MessageCount["assistant"]; !ok {
 				newStat.MessageCount["assistant"] = rand.Intn(10)
 			}
-			
+
 			// Add the new data point
 			s.memoryStats = append(s.memoryStats, newStat)
-			
+
 			// Keep only the last 60 data points
 			if len(s.memoryStats) > 60 {
 				s.memoryStats = s.memoryStats[len(s.memoryStats)-60:]
 			}
 		}
-		
+
 		return
 	}
-	
+
 	// If we have a real client, get actual memory stats
 	if s.client != nil {
 		// Get memory stats
@@ -615,10 +706,10 @@ func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 			log.Printf("Error getting memory stats: %v", err)
 			return
 		}
-		
+
 		// Add to memory stats
 		s.memoryStats = append(s.memoryStats, stats)
-		
+
 		// Keep only the last 60 data points
 		if len(s.memoryStats) > 60 {
 			s.memoryStats = s.memoryStats[len(s.memoryStats)-60:]
@@ -626,7 +717,6 @@ func (s *DashboardServer) collectAndStoreStats(ctx context.Context) {
 	}
 }
 
-// addLogEntry adds a log entry to the activity log
 func (s *DashboardServer) addLogEntry(ctx context.Context, message string) {
 	// Store the log entry in memory
 	entry := LogEntry{
@@ -646,7 +736,6 @@ func (s *DashboardServer) addLogEntry(ctx context.Context, message string) {
 	s.statsMu.Unlock()
 }
 
-// handleDashboard handles the dashboard page
 func (s *DashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.incrementRequestCount()
 
@@ -668,11 +757,11 @@ func (s *DashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request
 	}{
 		Stats:         stats,
 		ServerUptime:  s.getUptime(),
-		ServerVersion: "1.2.0",
+		ServerVersion: "1.3.0",
 	}
 
 	// Parse and execute template
-	tmpl, err := template.ParseFiles("web/templates/dashboard.html")
+	tmpl, err := template.ParseFiles(filepath.Join(s.webDir, "templates/dashboard.html"))
 	if err != nil {
 		http.Error(w, "Failed to parse template: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -685,62 +774,77 @@ func (s *DashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// getMemoryStats gets the latest memory stats
-func (s *DashboardServer) getMemoryStats() (MemoryStatsPoint, error) {
-	// If we're in test mode (no client), return sample data
-	if s.client == nil {
-		// Return sample data
-		return MemoryStatsPoint{
-			Timestamp:       time.Now(),
-			TotalVectors:    rand.Intn(1000) + 500,
-			ProjectFileCount: rand.Intn(50) + 10,
-			MessageCount: map[string]int{
-				"user":      rand.Intn(100) + 50,
-				"assistant": rand.Intn(100) + 50,
-				"system":    rand.Intn(10) + 5,
-			},
-		}, nil
-	}
-	
-	// Get memory stats from client
-	stats := MemoryStatsPoint{
-		Timestamp:    time.Now(),
-		MessageCount: make(map[string]int),
-	}
-	
-	// Use the client to get stats
-	ctx := context.Background()
-	
-	// Get project files to count them
-	projectFiles, err := s.client.ListProjectFiles(ctx, 1000)
-	if err != nil {
-		return stats, fmt.Errorf("failed to get project files: %w", err)
-	}
-	stats.ProjectFileCount = len(projectFiles)
-	
-	// For a real implementation, we would use methods like:
-	// - s.client.CountVectors(ctx)
-	// - s.client.CountMessagesByRole(ctx)
-	// But for now, we'll use some placeholder values
-	stats.TotalVectors = stats.ProjectFileCount * 10 // Estimate based on project files
-	
-	// Estimate message counts based on project files
-	stats.MessageCount["user"] = stats.ProjectFileCount * 2
-	stats.MessageCount["assistant"] = stats.ProjectFileCount * 2
-	stats.MessageCount["system"] = stats.ProjectFileCount / 2
-	
-	return stats, nil
-}
-
-// getUptime gets the server uptime
 func (s *DashboardServer) getUptime() string {
 	return time.Since(s.startTime).Round(time.Second).String()
 }
 
-// incrementRequestCount increments the request count
 func (s *DashboardServer) incrementRequestCount() {
 	s.requestsMu.Lock()
 	defer s.requestsMu.Unlock()
 
 	s.requestsHandled++
+}
+
+func (s *DashboardServer) handleAPIConversationHistory(w http.ResponseWriter, r *http.Request) {
+	if s.client == nil {
+		// Return sample data in test mode
+		sampleMessages := []map[string]interface{}{
+			{
+				"id":        "sample-1",
+				"role":      "user",
+				"content":   "This is a sample user message",
+				"timestamp": time.Now().Add(-10 * time.Minute).Format(time.RFC3339),
+			},
+			{
+				"id":        "sample-2",
+				"role":      "assistant",
+				"content":   "This is a sample assistant response",
+				"timestamp": time.Now().Add(-9 * time.Minute).Format(time.RFC3339),
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"messages": sampleMessages,
+		})
+		return
+	}
+
+	// Get limit parameter
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50 // Default limit
+	if limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+
+	// Get conversation history
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	messages, err := s.client.GetConversationHistory(ctx, limit, nil)
+	if err != nil {
+		log.Printf("Error getting conversation history: %v", err)
+		http.Error(w, "Failed to get conversation history", http.StatusInternalServerError)
+		return
+	}
+
+	// Format messages for JSON response
+	formattedMessages := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		formattedMessages[i] = map[string]interface{}{
+			"id":        msg.ID,
+			"role":      msg.Role,
+			"content":   msg.Content,
+			"timestamp": msg.Timestamp.Format(time.RFC3339),
+			"tags":      msg.Tags,
+		}
+	}
+
+	// Return the messages
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"messages": formattedMessages,
+	})
 }

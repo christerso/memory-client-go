@@ -177,23 +177,48 @@
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>Project Files</span>
-                        <span id="file-count" class="badge bg-info">0 files</span>
+                        <button class="btn btn-sm btn-outline-primary refresh-files-btn">Refresh</button>
                     </div>
-                    <div class="card-body p-0">
+                    <div class="card-body">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0">
+                            <table class="table table-hover">
                                 <thead>
                                     <tr>
+                                        <th>Filename</th>
                                         <th>Path</th>
-                                        <th>Language</th>
-                                        <th>Tag</th>
-                                        <th>Modified</th>
+                                        <th>Size</th>
+                                        <th>Last Modified</th>
                                     </tr>
                                 </thead>
-                                <tbody id="project-files">
+                                <tbody id="projectFilesTable">
+                                    <!-- Project files will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row conversation-history-row mt-3">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Conversation History</span>
+                        <button class="btn btn-sm btn-outline-primary refresh-history-btn">Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
                                     <tr>
-                                        <td colspan="4" class="text-center">Loading...</td>
+                                        <th>Time</th>
+                                        <th>Role</th>
+                                        <th>Content</th>
                                     </tr>
+                                </thead>
+                                <tbody id="conversationHistoryTable">
+                                    <!-- Conversation history will be loaded here -->
                                 </tbody>
                             </table>
                         </div>

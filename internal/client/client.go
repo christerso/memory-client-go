@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/christerso/memory-client-go/internal/mcp"
 	"github.com/christerso/memory-client-go/internal/models"
 )
 
@@ -18,6 +19,7 @@ type MemoryClient struct {
 	httpClient     *http.Client
 	qdrantURL      string
 	collectionName string
+	qdrant         *mcp.QdrantWrapper
 	embeddingSize  int
 	verbose        bool
 }
@@ -59,6 +61,26 @@ func (c *MemoryClient) PurgeQdrant(ctx context.Context) error {
 	return c.recreateCollection(ctx)
 }
 
+// GetQdrantClient returns the underlying Qdrant client.
+func (mc *MemoryClient) GetQdrantClient() *mcp.QdrantWrapper {
+	return mc.qdrant
+}
+
+// GetQdrantURL returns the Qdrant server URL
+func (c *MemoryClient) GetQdrantURL() string {
+	return c.qdrantURL
+}
+
+// GetCollectionName returns the collection name
+func (c *MemoryClient) GetCollectionName() string {
+	return c.collectionName
+}
+
+// GenerateEmbedding generates an embedding for the given text
+func (c *MemoryClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	return c.generateEmbedding(ctx, text)
+}
+
 // DeleteMessagesByTimeRange deletes messages in a specific time range
 func (c *MemoryClient) DeleteMessagesByTimeRange(ctx context.Context, from, to time.Time) (int, error) {
 	if c.verbose {
@@ -71,7 +93,7 @@ func (c *MemoryClient) DeleteMessagesByTimeRange(ctx context.Context, from, to t
 
 	// Create filter for time range
 	url := fmt.Sprintf("%s/collections/%s/points/delete", c.qdrantURL, c.collectionName)
-	
+
 	request := map[string]interface{}{
 		"filter": map[string]interface{}{
 			"must": []map[string]interface{}{
@@ -142,21 +164,21 @@ func (c *MemoryClient) DeleteMessagesForCurrentDay(ctx context.Context) (int, er
 	now := time.Now()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 999999999, now.Location())
-	
+
 	return c.DeleteMessagesByTimeRange(ctx, startOfDay, endOfDay)
 }
 
 // DeleteMessagesForCurrentWeek deletes all messages from the current week
 func (c *MemoryClient) DeleteMessagesForCurrentWeek(ctx context.Context) (int, error) {
 	now := time.Now()
-	
+
 	// Calculate the start of the week (Sunday)
 	daysToSunday := int(now.Weekday())
 	startOfWeek := time.Date(now.Year(), now.Month(), now.Day()-daysToSunday, 0, 0, 0, 0, now.Location())
-	
+
 	// Calculate the end of the week (Saturday)
 	endOfWeek := time.Date(now.Year(), now.Month(), now.Day()+(6-daysToSunday), 23, 59, 59, 999999999, now.Location())
-	
+
 	return c.DeleteMessagesByTimeRange(ctx, startOfWeek, endOfWeek)
 }
 
@@ -165,7 +187,7 @@ func (c *MemoryClient) DeleteMessagesForCurrentMonth(ctx context.Context) (int, 
 	now := time.Now()
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	endOfMonth := time.Date(now.Year(), now.Month()+1, 0, 23, 59, 59, 999999999, now.Location())
-	
+
 	return c.DeleteMessagesByTimeRange(ctx, startOfMonth, endOfMonth)
 }
 
@@ -179,7 +201,7 @@ func (c *MemoryClient) IndexMessages(ctx context.Context) error {
 	if c.verbose {
 		fmt.Println("Indexing messages")
 	}
-	
+
 	// This is a no-op as messages are indexed when added
 	return nil
 }

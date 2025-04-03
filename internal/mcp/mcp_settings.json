@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "memory-server": {
-      "command": "C:/Users/christer/AppData/Roaming/memory-client/bin/memory-client.exe",
+      "command": "C:/Users/christer/Desktop/memory-client-go/memory-client.exe",
       "args": ["mcp", "--verbose"],
       "env": {
         "QDRANT_URL": "http://localhost:6333",

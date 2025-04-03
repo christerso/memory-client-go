@@ -1,0 +1,4 @@
+2025/04/03 18:41:20 WARN Unable to get server version, use default err="failed to exit idle mode: invalid target address http://localhost:6333:6334, error info: address http://localhost:6333:6334:443: too many colons in address" default=Unknown
+2025/04/03 18:41:20 WARN Failed to obtain server version. Unable to check client-server compatibility. Set SkipCompatibilityCheck=true to skip version check.
+2025/04/03 18:41:20 Starting HTTP server on :9580
+2025/04/03 18:41:20 Starting API server on :10010

@@ -82,8 +82,14 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo Copying Windsurf integration script...
-copy /Y "%REPO_DIR%\scripts\windsurf-memory-integration.js" "%INSTALL_DIR%\windsurf-memory-integration.js" >nul
+echo Copying Windsurf integration files...
+copy /Y "%~dp0windsurf-memory-integration.js" "%INSTALL_DIR%\windsurf-memory-integration.js"
+copy /Y "%~dp0windsurf-loader.js" "%INSTALL_DIR%\windsurf-loader.js"
+copy /Y "%~dp0windsurf-standalone-memory.js" "%INSTALL_DIR%\windsurf-standalone-memory.js"
+copy /Y "%~dp0windsurf-integration-guide.md" "%INSTALL_DIR%\windsurf-integration-guide.md" >nul
+
+REM Update the script path in the loader
+powershell -Command "(Get-Content '%INSTALL_DIR%\windsurf-loader.js') -replace '%%INSTALL_DIR%%', '%INSTALL_DIR:\=\\%' | Set-Content '%INSTALL_DIR%\windsurf-loader.js'"
 
 echo Copying VS Code extension...
 if not exist "%INSTALL_DIR%\vscode-extension" mkdir "%INSTALL_DIR%\vscode-extension"
@@ -172,6 +178,15 @@ echo - HTTP API running on port 10010
 echo - Automatic message tagging and categorization
 echo - VS Code extension available in %INSTALL_DIR%\vscode-extension
 echo - Windsurf integration script available in %INSTALL_DIR%\windsurf-memory-integration.js
+echo.
+echo To integrate with Windsurf:
+echo 1. Open Windsurf in your browser
+echo 2. Open the browser console (F12 or Ctrl+Shift+I)
+echo 3. Run this command in the console:
+echo    const script = document.createElement('script'); script.src = '%INSTALL_DIR:\=\\%\\windsurf-memory-integration.js'; document.head.appendChild(script);
+echo.
+echo For detailed integration instructions, see:
+echo %INSTALL_DIR%\windsurf-integration-guide.md
 echo.
 echo To use the conversation capture client:
 echo memory-client message -role=user -content="Your message"

@@ -1,0 +1,2 @@
+2025/04/01 20:43:38 Starting HTTP server on :8080
+2025/04/01 20:43:38 HTTP server error: listen tcp :8080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.

@@ -12,6 +12,40 @@ echo "Building memory-client-go binary..."
 cd "$ROOT_DIR" || exit 1
 go build -o memory-client-go
 
+# Create necessary directories
+CONFIG_DIR="$HOME/.config/memory-client"
+MCP_CONFIG_DIR="$HOME/.config/cline"
+mkdir -p "$CONFIG_DIR"
+mkdir -p "$MCP_CONFIG_DIR"
+
+# Create the config.yaml file if it doesn't exist
+if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
+    echo "Creating memory-client configuration file..."
+    cat > "$CONFIG_DIR/config.yaml" << EOF
+# Qdrant server URL
+QDRANT_URL: "http://localhost:6333"
+
+# Collection name for storing conversation memory
+COLLECTION_NAME: "conversation_memory"
+
+# Size of embedding vectors
+EMBEDDING_SIZE: 384
+EOF
+fi
+
+# Create or update MCP settings
+echo "Setting up MCP configuration..."
+MCP_SETTINGS_FILE="$MCP_CONFIG_DIR/mcp_settings.json"
+cat > "$MCP_SETTINGS_FILE" << EOF
+{
+    "executable": "${ROOT_DIR}/memory-client-go",
+    "arguments": ["mcp"],
+    "workingDir": "${ROOT_DIR}"
+}
+EOF
+
+echo "MCP configuration has been set up at: $MCP_SETTINGS_FILE"
+
 # Create the launchd plist file
 PLIST_FILE="$HOME/Library/LaunchAgents/com.christerso.memory-client-mcp.plist"
 PLIST_DIR="$HOME/Library/LaunchAgents"
@@ -47,17 +81,18 @@ cat > "$PLIST_FILE" << EOF
 </plist>
 EOF
 
+# Ensure Qdrant is running
+echo "Checking if Qdrant is running..."
+"$SCRIPT_DIR/ensure-qdrant.sh"
+
 # Load the service
 echo "Loading the service..."
+launchctl unload "$PLIST_FILE" 2>/dev/null || true
 launchctl load "$PLIST_FILE"
 
 echo "Memory Client MCP service has been installed and started."
 echo "The service will automatically start when you log in."
-echo "Log file: $HOME/Library/Logs/memory-client-mcp.log"
-
+echo "You can check the service status with: launchctl list | grep memory-client"
+echo "Logs are available at: $HOME/Library/Logs/memory-client-mcp.log"
 echo ""
-echo "You can manage the service with the following commands:"
-echo "  launchctl load $PLIST_FILE"
-echo "  launchctl unload $PLIST_FILE"
-echo "  launchctl start com.christerso.memory-client-mcp"
-echo "  launchctl stop com.christerso.memory-client-mcp"
+echo "To verify the service is working, visit: http://localhost:8080/status"

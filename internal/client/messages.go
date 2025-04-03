@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/christerso/memory-client-go/internal/models"
+	"github.com/google/uuid"
 )
 
 // AddMessage adds a message to memory
@@ -20,24 +21,31 @@ func (c *MemoryClient) AddMessage(ctx context.Context, message *models.Message) 
 		return fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
+	// Generate UUID if not provided
+	if message.ID == "" {
+		message.ID = uuid.New().String()
+	}
+
 	// Create point
 	point := map[string]interface{}{
-		"id": message.ID,
+		"id":     message.ID,
 		"vector": embedding,
 		"payload": map[string]interface{}{
-			"role":       message.Role,
-			"content":    message.Content,
-			"timestamp":  message.Timestamp.Format(time.RFC3339),
-			"metadata":   message.Metadata,
-			"tags":       message.Tags,
+			"role":      message.Role,
+			"content":   message.Content,
+			"timestamp": message.Timestamp.Format(time.RFC3339),
+			"metadata":  message.Metadata,
+			"tags":      message.Tags,
 		},
 	}
 
 	// Add point to collection
 	url := fmt.Sprintf("%s/collections/%s/points", c.qdrantURL, c.collectionName)
-	
+
+	// Include the ids field as required by Qdrant
 	request := map[string]interface{}{
 		"points": []interface{}{point},
+		"ids":    []string{message.ID},
 	}
 
 	jsonData, err := json.Marshal(request)
@@ -45,7 +53,7 @@ func (c *MemoryClient) AddMessage(ctx context.Context, message *models.Message) 
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
@@ -74,24 +82,36 @@ func (c *MemoryClient) GetConversationHistory(ctx context.Context, limit int, fi
 	if filter != nil {
 		if !filter.StartTime.IsZero() || !filter.EndTime.IsZero() {
 			dateFilter := map[string]interface{}{}
-			
+
 			if !filter.StartTime.IsZero() {
 				dateFilter["gte"] = filter.StartTime.Format(time.RFC3339)
 			}
-			
+
 			if !filter.EndTime.IsZero() {
 				dateFilter["lte"] = filter.EndTime.Format(time.RFC3339)
 			}
-			
+
 			filterObj["timestamp"] = dateFilter
+		}
+
+		// Add role filter
+		if filter.Role != "" {
+			filterObj["role"] = filter.Role
+		}
+
+		// Add tags filter
+		if len(filter.Tags) > 0 {
+			filterObj["tags"] = map[string]interface{}{
+				"any": filter.Tags,
+			}
 		}
 	}
 
 	// Build request
 	request := map[string]interface{}{
-		"limit": limit,
+		"limit":        limit,
 		"with_payload": true,
-		"with_vector": false,
+		"with_vector":  false,
 	}
 
 	if len(filterObj) > 0 {
@@ -529,16 +549,17 @@ func (c *MemoryClient) updateMessage(ctx context.Context, message models.Message
 	point := map[string]interface{}{
 		"id": message.ID,
 		"payload": map[string]interface{}{
-			"role":       message.Role,
-			"content":    message.Content,
-			"timestamp":  message.Timestamp.Format(time.RFC3339),
-			"metadata":   message.Metadata,
-			"tags":       message.Tags,
+			"role":      message.Role,
+			"content":   message.Content,
+			"timestamp": message.Timestamp.Format(time.RFC3339),
+			"metadata":  message.Metadata,
+			"tags":      message.Tags,
 		},
 	}
 
 	request := map[string]interface{}{
 		"points": []interface{}{point},
+		"ids":    []string{message.ID}, // Add the ids field that Qdrant expects
 	}
 
 	jsonData, err := json.Marshal(request)

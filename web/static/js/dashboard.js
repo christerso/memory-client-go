@@ -82,49 +82,124 @@ async function loadActivityLog() {
 }
 
 // Load project files
-async function loadProjectFiles(tag) {
+async function loadProjectFiles() {
     try {
-        let url = '/api/memory/files';
-        if (tag) {
-            url = '/api/memory/files/filter?tag=' + encodeURIComponent(tag);
-        }
+        const response = await fetch('/api/project-files');
+        const data = await response.json();
         
-        const response = await fetch(url);
-        const files = await response.json();
+        const tableBody = document.getElementById('projectFilesTable');
+        tableBody.innerHTML = '';
         
-        const filesTable = document.getElementById('project-files');
-        filesTable.innerHTML = '';
-        
-        document.getElementById('file-count').textContent = files.length + ' files';
-        
-        if (files.length === 0) {
-            filesTable.innerHTML = '<tr><td colspan="4" class="text-center">No project files found</td></tr>';
-            return;
-        }
-        
-        files.forEach(function(file) {
+        if (data.files && data.files.length > 0) {
+            data.files.forEach(function(file) {
+                const row = document.createElement('tr');
+                
+                // Extract filename from path
+                const filename = file.path.split('/').pop();
+                
+                // Format file size
+                const size = formatFileSize(file.size);
+                
+                // Format date
+                const date = new Date(file.modified);
+                const formattedDate = date.toLocaleString();
+                
+                row.innerHTML = `
+                    <td>${filename}</td>
+                    <td>${file.path}</td>
+                    <td>${size}</td>
+                    <td>${formattedDate}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        } else {
             const row = document.createElement('tr');
-            
-            // Format the modified time properly
-            let modTime = 'Unknown';
-            if (file.mod_time) {
-                modTime = new Date(file.mod_time * 1000).toLocaleString();
-            }
-            
-            // Determine language with fallback
-            const language = file.language || getLanguageFromPath(file.path);
-            
-            row.innerHTML = 
-                '<td class="text-truncate" style="max-width: 300px;">' + file.path + '</td>' +
-                '<td>' + language + '</td>' +
-                '<td>' + (file.tag || '-') + '</td>' +
-                '<td>' + modTime + '</td>';
-            
-            filesTable.appendChild(row);
-        });
+            row.innerHTML = '<td colspan="4" class="text-center">No project files found</td>';
+            tableBody.appendChild(row);
+        }
     } catch (error) {
         console.error('Error loading project files:', error);
+        const tableBody = document.getElementById('projectFilesTable');
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-center">Error loading project files</td></tr>';
     }
+}
+
+// Format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Load conversation history
+async function loadConversationHistory() {
+    try {
+        const response = await fetch('/api/conversation-history?limit=50');
+        const data = await response.json();
+        
+        const tableBody = document.getElementById('conversationHistoryTable');
+        tableBody.innerHTML = '';
+        
+        if (data.messages && data.messages.length > 0) {
+            // Sort messages by timestamp (newest first)
+            data.messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            data.messages.forEach(function(message) {
+                const row = document.createElement('tr');
+                
+                // Format date
+                const date = new Date(message.timestamp);
+                const formattedDate = date.toLocaleString();
+                
+                // Format role with color
+                let roleClass = '';
+                switch(message.role) {
+                    case 'user':
+                        roleClass = 'text-primary';
+                        break;
+                    case 'assistant':
+                        roleClass = 'text-success';
+                        break;
+                    case 'system':
+                        roleClass = 'text-warning';
+                        break;
+                    default:
+                        roleClass = 'text-secondary';
+                }
+                
+                row.innerHTML = `
+                    <td>${formattedDate}</td>
+                    <td><span class="${roleClass}">${message.role}</span></td>
+                    <td>${escapeHtml(message.content)}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        } else {
+            const row = document.createElement('tr');
+            row.innerHTML = '<td colspan="3" class="text-center">No messages found</td>';
+            tableBody.appendChild(row);
+        }
+    } catch (error) {
+        console.error('Error loading conversation history:', error);
+        const tableBody = document.getElementById('conversationHistoryTable');
+        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">Error loading conversation history</td></tr>';
+    }
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 // Helper function to determine language from file path
@@ -254,24 +329,28 @@ document.addEventListener('DOMContentLoaded', function() {
     loadMemoryStats();
     loadActivityLog();
     loadProjectFiles();
+    loadConversationHistory();
     
-    // Set up refresh intervals
-    // Refresh memory stats every 5 seconds for a smoother chart
-    setInterval(loadMemoryStats, 5000);
+    // Set up refresh buttons
+    document.querySelector('.refresh-files-btn').addEventListener('click', loadProjectFiles);
+    document.querySelector('.refresh-history-btn').addEventListener('click', loadConversationHistory);
     
-    // Refresh activity log every 10 seconds
-    setInterval(loadActivityLog, 10000);
-    
-    // Refresh project files every 30 seconds
-    setInterval(loadProjectFiles, 30000);
-    
-    // Update uptime every second
+    // Set up auto-refresh
+    setInterval(loadMemoryStats, 15000);
+    setInterval(loadActivityLog, 15000);
+    setInterval(loadConversationHistory, 15000);
     setInterval(updateUptime, 1000);
     
-    // Set up event listeners
-    document.getElementById('filter-button').addEventListener('click', filterProjectFiles);
-    document.getElementById('clear-filter-button').addEventListener('click', clearFilter);
-    document.getElementById('clear-all-button').addEventListener('click', function() { clearMemory('all'); });
-    document.getElementById('clear-messages-button').addEventListener('click', function() { clearMemory('messages'); });
-    document.getElementById('clear-files-button').addEventListener('click', function() { clearMemory('project-files'); });
+    // Set up event listeners for memory clearing
+    document.getElementById('clear-vectors-btn').addEventListener('click', function() {
+        clearMemory('vectors');
+    });
+    
+    document.getElementById('clear-files-btn').addEventListener('click', function() {
+        clearMemory('files');
+    });
+    
+    document.getElementById('clear-all-btn').addEventListener('click', function() {
+        clearMemory('all');
+    });
 });
